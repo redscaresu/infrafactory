@@ -75,12 +75,14 @@ var (
 // OurOverride holds the backend override and AWSOverride the provider
 // override, each in its own file as ADR-0042 lays them out.
 // RehearsalFakeawsModule and RehearsalFakeawsPin are the fakeaws module
-// and commit fakeawsAtPin clones and builds.
+// and commit fakeawsAtPin clones and builds. RehearsalTofuTimeout bounds
+// each tofu command prepare runs, for the passthrough e2e's prepare step.
 const (
 	OurOverride            = ourOverride
 	AWSOverride            = rehearsalAWSOverride
 	RehearsalFakeawsModule = rehearsalFakeawsModule
 	RehearsalFakeawsPin    = rehearsalFakeawsPin
+	RehearsalTofuTimeout   = rehearsalTofuTimeout
 )
 
 // StopRehearsalFakeaws stops the fakeaws whose process group is pid, as a

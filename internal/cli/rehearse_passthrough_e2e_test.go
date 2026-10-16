@@ -23,9 +23,20 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
-// passthroughStepTimeout bounds each rehearse command the e2e runs: its
-// context is cancelled at the deadline, which interrupts tofu.
+// passthroughStepTimeout bounds each passthrough command the e2e runs:
+// its context is cancelled at the deadline, which interrupts tofu.
 const passthroughStepTimeout = 5 * time.Minute
+
+// passthroughPrepareTimeout bounds prepare, whose two tofu inits may each
+// take rehearsalTofuTimeout, plus a margin for starting fakeaws.
+const passthroughPrepareTimeout = 2*cli.RehearsalTofuTimeout + 5*time.Minute
+
+// Tofu's own exit codes, which passthrough returns unchanged: 1 is an
+// error, and 2 is plan -detailed-exitcode's "changes present".
+const (
+	tofuExitError   = 1
+	tofuExitChanges = 2
+)
 
 // The CIDRs of the VPC the root creates, which the var file sets, and of
 // the one the test creates in fakeaws outside the state and imports.
@@ -88,7 +99,7 @@ func TestRehearsePassthroughE2E(t *testing.T) {
 	t.Chdir(repo)
 	t.Cleanup(func() { stopRecordedFakeaws(t, repo) })
 
-	code, stdout, stderr := rehearseStep(t, "prepare", "envs/prod", "--account", wallsAccount, "--region", assumptionRegion, "--fakeaws-bin", bin, "--var-file", "prod.tfvars", "--output", "json")
+	code, stdout, stderr := rehearseStep(t, passthroughPrepareTimeout, "prepare", "envs/prod", "--account", wallsAccount, "--region", assumptionRegion, "--fakeaws-bin", bin, "--var-file", "prod.tfvars", "--output", "json")
 	require.Equal(t, cli.ExitCodeSuccess, code, "%s\n%s", stdout, stderr)
 	var result struct {
 		ID      string `json:"id"`
@@ -101,40 +112,40 @@ func TestRehearsePassthroughE2E(t *testing.T) {
 	id := result.ID
 
 	t.Run("console is refused", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "console", id)
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "console", id)
 		assert.Equal(t, cli.ExitCodeUsage, code, "%s\n%s", stdout, stderr)
 		assert.Contains(t, stderr, `unknown command "console"`)
 	})
 	t.Run("plan -var is refused before tofu runs", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "plan", id, "--", "-var=cidr=10.9.0.0/16")
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "plan", id, "--", "-var=cidr=10.9.0.0/16")
 		assert.Equal(t, cli.ExitCodeRuntime, code)
 		assert.Contains(t, stderr, "tofu plan: -var is refused")
 		assert.Empty(t, stdout, "tofu ran")
 	})
 	t.Run("plan -out -detailed-exitcode", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "plan", id, "--", "-out=p", "-detailed-exitcode", "-no-color", "-target=aws_vpc.main")
-		require.Equal(t, 2, code, "%s\n%s", stdout, stderr)
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "plan", id, "--", "-out=p", "-detailed-exitcode", "-no-color", "-target=aws_vpc.main")
+		require.Equal(t, tofuExitChanges, code, "%s\n%s", stdout, stderr)
 		assert.Contains(t, stdout, "aws_vpc.main will be created")
-		assert.Contains(t, stdout, `cidr_block                           = "`+passthroughVarCIDR+`"`)
+		assert.Regexp(t, `cidr_block\s+= "`+regexp.QuoteMeta(passthroughVarCIDR)+`"`, stdout)
 		assert.Contains(t, stdout, "Plan: 1 to add, 0 to change, 0 to destroy.")
 		assert.FileExists(t, filepath.Join(result.WorkDir, "p"))
 	})
 	t.Run("apply with a plan file is refused", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "apply", id, "--", "p")
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "apply", id, "--", "p")
 		assert.Equal(t, cli.ExitCodeRuntime, code)
 		assert.Contains(t, stderr, `tofu apply: the plan file "p" is refused`)
 		assert.Empty(t, stdout, "tofu ran")
 	})
 	t.Run("apply without -auto-approve fails in tofu", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "apply", id, "--", "-no-color", "-target=aws_vpc.main")
-		assert.Equal(t, 1, code, "%s\n%s", stdout, stderr)
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "apply", id, "--", "-no-color", "-target=aws_vpc.main")
+		assert.Equal(t, tofuExitError, code, "%s\n%s", stdout, stderr)
 		assert.Contains(t, stderr, "Error: error asking for approval: EOF")
 		assert.Empty(t, passthroughVPCs(t, record.Port, record.Token), "tofu applied without approval")
 	})
 
 	var mainID string
 	t.Run("apply -auto-approve", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "apply", id, "--", "-auto-approve", "-no-color", "-target=aws_vpc.main")
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "apply", id, "--", "-auto-approve", "-no-color", "-target=aws_vpc.main")
 		require.Equal(t, cli.ExitCodeSuccess, code, "%s\n%s", stdout, stderr)
 		vpcs := passthroughVPCs(t, record.Port, record.Token)
 		require.Len(t, vpcs, 1)
@@ -144,18 +155,18 @@ func TestRehearsePassthroughE2E(t *testing.T) {
 	})
 	require.NotEmpty(t, mainID)
 	t.Run("state mv", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "state", "mv", id, "--", "aws_vpc.main", "aws_vpc.moved")
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "state", "mv", id, "--", "aws_vpc.main", "aws_vpc.moved")
 		require.Equal(t, cli.ExitCodeSuccess, code, "%s\n%s", stdout, stderr)
 		assert.Equal(t, map[string]string{"aws_vpc.moved": mainID}, passthroughState(t, state))
 	})
 	t.Run("import", func(t *testing.T) {
 		outside := passthroughCreateVPC(t, record.Port, passthroughImportCIDR)
-		code, stdout, stderr := rehearseStep(t, "import", id, "--", "-no-color", "aws_vpc.imported", outside)
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "import", id, "--", "-no-color", "aws_vpc.imported", outside)
 		require.Equal(t, cli.ExitCodeSuccess, code, "%s\n%s", stdout, stderr)
 		assert.Equal(t, map[string]string{"aws_vpc.moved": mainID, "aws_vpc.imported": outside}, passthroughState(t, state))
 	})
 	t.Run("destroy -auto-approve", func(t *testing.T) {
-		code, stdout, stderr := rehearseStep(t, "destroy", id, "--", "-auto-approve", "-no-color")
+		code, stdout, stderr := rehearseStep(t, passthroughStepTimeout, "destroy", id, "--", "-auto-approve", "-no-color")
 		require.Equal(t, cli.ExitCodeSuccess, code, "%s\n%s", stdout, stderr)
 		assert.Empty(t, passthroughVPCs(t, record.Port, record.Token))
 		assert.Empty(t, passthroughState(t, state))
@@ -163,23 +174,21 @@ func TestRehearsePassthroughE2E(t *testing.T) {
 }
 
 // rehearseStep runs `infrafactory rehearse args...` in-process under
-// passthroughStepTimeout, and returns its exit code and output.
-func rehearseStep(t *testing.T, args ...string) (int, string, string) {
+// timeout and reports its error through cli.ReportError, as the binary
+// does, and returns the exit code and output.
+func rehearseStep(t *testing.T, timeout time.Duration, args ...string) (int, string, string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), passthroughStepTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	root := cli.NewRootCmd()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.SetArgs(append([]string{"rehearse"}, args...))
-	err := root.ExecuteContext(ctx)
-	require.NoError(t, ctx.Err(), "rehearse %s ran past %s", strings.Join(args, " "), passthroughStepTimeout)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-	}
+	code := cli.ReportError(root.ExecuteContext(ctx), stderr)
 	t.Logf("rehearse %s\n%s%s", strings.Join(args, " "), stdout, stderr)
-	return cli.ExitCodeForError(err), stdout.String(), stderr.String()
+	require.NoError(t, ctx.Err(), "rehearse %s ran past %s", strings.Join(args, " "), timeout)
+	return code, stdout.String(), stderr.String()
 }
 
 // passthroughVPC is a VPC in fakeaws's /mock/state.
