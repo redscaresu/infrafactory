@@ -106,3 +106,5 @@ func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
+
+// Scratch change for the ci-board-only demo (PR #579); never merged.
