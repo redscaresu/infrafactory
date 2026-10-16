@@ -1,9 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: blocked
-blocked_by: [fakeaws-vpc-dns-attribute-rules]
-depends_on: [fakeaws-vpc-dns-attribute-rules]
+status: ready
 touches: [handlers/ec2.go, handlers/ec2_test.go, CHANGELOG.md]
 ---
 
