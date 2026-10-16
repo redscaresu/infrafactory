@@ -7,7 +7,7 @@ Thanks for considering a contribution! This document is the human contributor's 
 1. **Open an issue first** for anything non-trivial. We'd rather discuss the approach than discard a finished PR.
 2. **Pick a focused change.** Mixing a feature + refactor + dependency bump in one PR is the fastest way to get blocked on review.
 3. **Add tests** with behavior changes. Coverage is enforced (`make test` runs Go unit + UI unit + Playwright e2e).
-4. **CI runs the full suite** and blocks merge; `make test` runs it locally. The pre-commit hook runs `gitleaks`, `go vet` and the tests of the packages you touched.
+4. **CI runs the full suite** and blocks merge; `make test` runs it locally. A PR that changes only board files (`scripts/ci_board_only.sh` lists them) skips it. The pre-commit hook runs `gitleaks`, `go vet` and the tests of the packages you touched.
 5. **If your change finishes an item in `docs/stories/`, delete its file** in the same PR. Your PR title is the change log.
 
 ## First-time contributors

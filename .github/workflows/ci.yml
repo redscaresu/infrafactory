@@ -21,7 +21,109 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Decides once whether a PR changes only board files
+  # (scripts/ci_board_only.sh). test-full, aws-e2e-full and govulncheck are
+  # skipped only when this job succeeded and said skip, so a failure here, or
+  # a push to main (which skips this job), runs every job in full.
+  board:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+      report: ${{ steps.check.outputs.report }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The diff needs the merge base of the PR's base and head.
+          fetch-depth: 0
+
+      - name: Board-only check
+        id: check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # The base branch's copy of the script decides, so a PR cannot loosen
+        # the gate that judges it: a change to the script is not a board file,
+        # so that PR runs everything, the script's own test included. `bash` on
+        # an empty file exits 0, so `git show` must succeed for a skip.
+        run: |
+          report="no scripts/ci_board_only.sh at the base: running the full jobs"
+          if git show "$BASE_SHA:scripts/ci_board_only.sh" > "$RUNNER_TEMP/ci_board_only.sh" &&
+            report="$(bash "$RUNNER_TEMP/ci_board_only.sh" "$BASE_SHA" "$HEAD_SHA")"; then
+            # Every line here is the script's own or a board path, so none
+            # can be the delimiter.
+            { echo "skip=true"; echo "report<<REPORT_END"; echo "$report"; echo "REPORT_END"; } >> "$GITHUB_OUTPUT"
+          fi
+          echo "$report"
+
+  # Board files link to each other, so a board-only PR still runs the doc
+  # link test. `go test` exits 0 when the test no longer exists, so the step
+  # passes only on its PASS line.
+  doc-links:
+    needs: board
+    if: needs.board.outputs.skip == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Doc links
+        run: |
+          go test ./internal/generator -run '^TestDocLinksResolve$' -count=1 -v | tee "$RUNNER_TEMP/doc-links.log"
+          grep -q '^--- PASS: TestDocLinksResolve ' "$RUNNER_TEMP/doc-links.log"
+
+  # The required checks are `test` and `aws-e2e`, so each always runs and
+  # reports. A board-only PR passes on the board report (and, for test, the
+  # doc link test); every other run passes only when its full job passed.
   test:
+    needs: [board, doc-links, test-full]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        env:
+          SKIP: ${{ needs.board.result == 'success' && needs.board.outputs.skip == 'true' }}
+          REPORT: ${{ needs.board.outputs.report }}
+          DOC_LINKS: ${{ needs.doc-links.result }}
+          FULL: ${{ needs.test-full.result }}
+        run: |
+          if [ "$SKIP" = true ]; then
+            echo "$REPORT"
+            echo "doc-links: $DOC_LINKS"
+            [ "$DOC_LINKS" = success ]
+          else
+            echo "test-full: $FULL"
+            [ "$FULL" = success ]
+          fi
+
+  aws-e2e:
+    needs: [board, aws-e2e-full]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        env:
+          SKIP: ${{ needs.board.result == 'success' && needs.board.outputs.skip == 'true' }}
+          REPORT: ${{ needs.board.outputs.report }}
+          FULL: ${{ needs.aws-e2e-full.result }}
+        run: |
+          if [ "$SKIP" = true ]; then
+            echo "$REPORT"
+          else
+            echo "aws-e2e-full: $FULL"
+            [ "$FULL" = success ]
+          fi
+
+  test-full:
+    needs: board
+    if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
     env:
       # M78 — share provider downloads across runs (~200MB saved per
@@ -30,6 +132,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Test the board-only check
+        run: bash scripts/ci_board_only_test.sh
 
       - name: Setup Go
         uses: actions/setup-go@v7
@@ -158,10 +263,12 @@ jobs:
           path: ui/playwright-report/
           retention-days: 7
 
-  # AWS against fakeaws runs beside `test`, not after it: it was 506 of the
+  # AWS against fakeaws runs beside test-full, not after it: it was 506 of the
   # test job's 865 s, so CI (and every swarm story's wait on it) took the sum.
-  # It is a required check on main in its own right.
-  aws-e2e:
+  # Its required check is `aws-e2e` above.
+  aws-e2e-full:
+    needs: board
+    if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
     env:
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
@@ -247,6 +354,8 @@ jobs:
           done
 
   govulncheck:
+    needs: board
+    if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     # S150-T1. Nothing scanned Go dependencies for known vulnerabilities
     # before this, so a vulnerable module could ship silently.
     #
