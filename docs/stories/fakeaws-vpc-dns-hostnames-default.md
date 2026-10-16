@@ -1,7 +1,7 @@
 ---
 kind: code
 repo: fakeaws
-status: later
+status: ready
 depends_on: [fakeaws-load-volumes-d7]
 touches: [handlers/ec2.go, handlers/ec2_test.go]
 ---
