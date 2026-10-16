@@ -429,7 +429,7 @@ func TestReadRunMetadataWithoutPitfallUsageFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(rewritten), "pitfalls_rendered", "an empty list is omitted")
 
-	meta.PitfallsRendered = []string{"a1b2c3d4e5f60718"}
+	meta.PitfallsRendered = []RenderedPitfall{{ID: "a1b2c3d4e5f60718", File: "aws.yaml"}}
 	require.NoError(t, store.WriteRunMetadata(meta))
 	reread, err := store.ReadRunMetadata("aws-web", "20261001T120000Z")
 	require.NoError(t, err)

@@ -20,11 +20,12 @@ import (
 const usageIPv6Rule = "exit status 1 | stderr: ╷ Do NOT use attribute `enable_ipv6` on `scaleway_instance_server` — observed in scenario \"web\" to cause the failure above."
 
 // runWithTwoPitfalls runs one stubbed iteration of example-scenario whose
-// generate_hcl prompt renders two scaleway pitfalls, the generated HCL setting enable_ipv6
-// on a server, and validate failing with staticErr (nil passes). It
-// returns the run's metadata, its first iteration's failures, and the
-// two rendered entries.
-func runWithTwoPitfalls(t *testing.T, staticErr error) (runstore.RunMetadata, []FailureSummary, []generator.PitfallEntry) {
+// generate_hcl phase reports carrying two scaleway pitfalls, as an adapter
+// does, with the generated HCL setting enable_ipv6 on a server and
+// validate failing with staticErr (nil passes). It returns the run's
+// metadata, its first iteration's failures and app.log, and the two
+// carried entries.
+func runWithTwoPitfalls(t *testing.T, staticErr, pitfallsErr error) (runstore.RunMetadata, []FailureSummary, string, []generator.PitfallEntry) {
 	t.Helper()
 	h := newCommandTestHarness(t)
 	mustWriteFile(t, filepath.Join(h.PitfallsDir(), "scaleway.yaml"), `provider: scaleway
@@ -36,12 +37,9 @@ pitfalls:
     rule: Always set a 'size_in_gb'.
     source: docs
 `)
-	rendered, err := generator.LoadRenderedPitfalls(h.PitfallsDir(), "scaleway")
+	carried, err := generator.LoadRenderedPitfalls(h.PitfallsDir(), "scaleway")
 	require.NoError(t, err)
-	require.Len(t, rendered, 2)
-
-	prompt, err := generator.LoadPitfalls(h.PitfallsDir(), "scaleway")
-	require.NoError(t, err)
+	require.Len(t, carried, 2)
 
 	opts := isolatedRunOpts(h, func(cfg config.Config) config.Config {
 		cfg.Agent.RepairIterationsMax = 1
@@ -54,8 +52,11 @@ pitfalls:
 	opts.deps = RuntimeDependencies{
 		Generator: generator.SeedGeneratorFunc(func(context.Context, generator.Request) (*generator.GeneratedCode, error) {
 			return &generator.GeneratedCode{
-				Files:    map[string][]byte{"main.tf": []byte("resource \"scaleway_instance_server\" \"web\" {\n  enable_ipv6 = true\n}\n")},
-				Metadata: generator.GenerationMetadata{Phases: []generator.PhaseResult{{Name: generator.PhaseGenerateHCL, Prompt: []byte(prompt)}}},
+				Files: map[string][]byte{"main.tf": []byte("resource \"scaleway_instance_server\" \"web\" {\n  enable_ipv6 = true\n}\n")},
+				Metadata: generator.GenerationMetadata{
+					Phases:      []generator.PhaseResult{{Name: generator.PhasePlanArchitecture}, {Name: generator.PhaseGenerateHCL, Pitfalls: carried}},
+					PitfallsErr: pitfallsErr,
+				},
 			}, nil
 		}),
 		Static:     static,
@@ -71,28 +72,55 @@ pitfalls:
 	runs, err := runstore.NewFilesystemStore(h.RunstoreRoot()).ListRuns("example-scenario")
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	payload, err := os.ReadFile(filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID, "iterations", "1", "iteration.json"))
+	runDir := filepath.Join(h.RunstoreRoot(), "example-scenario", runs[0].RunID)
+	payload, err := os.ReadFile(filepath.Join(runDir, "iterations", "1", "iteration.json"))
 	require.NoError(t, err)
 	var iteration struct {
 		Failures []FailureSummary `json:"failures"`
 	}
 	require.NoError(t, json.Unmarshal(payload, &iteration))
-	return runs[0], iteration.Failures, rendered
+	appLog, err := os.ReadFile(filepath.Join(runDir, "app.log"))
+	require.NoError(t, err)
+	return runs[0], iteration.Failures, string(appLog), carried
 }
 
 func TestRunRecordsRenderedPitfallIDs(t *testing.T) {
-	meta, _, rendered := runWithTwoPitfalls(t, nil)
+	meta, _, _, carried := runWithTwoPitfalls(t, nil, nil)
 
 	assert.Equal(t, "success", meta.Status)
-	assert.Equal(t, []string{
-		generator.PitfallID("scaleway", rendered[0]),
-		generator.PitfallID("scaleway", rendered[1]),
+	assert.Equal(t, []runstore.RenderedPitfall{
+		{ID: generator.PitfallID(carried[0]), File: "scaleway.yaml"},
+		{ID: generator.PitfallID(carried[1]), File: "scaleway.yaml"},
 	}, meta.PitfallsRendered)
 }
 
 func TestRunRecordsFailureMatchingRenderedPitfall(t *testing.T) {
-	_, failures, rendered := runWithTwoPitfalls(t, errors.New("Error: Unsupported argument\n  with scaleway_instance_server.web,\n  on main.tf line 2"))
+	_, failures, _, carried := runWithTwoPitfalls(t, errors.New("Error: Unsupported argument\n  with scaleway_instance_server.web,\n  on main.tf line 2"), nil)
 
 	require.NotEmpty(t, failures)
-	assert.Equal(t, generator.PitfallID("scaleway", rendered[0]), failures[0].MatchesPitfall)
+	assert.Equal(t, generator.PitfallID(carried[0]), failures[0].MatchesPitfall)
+}
+
+func TestRunLogsAPitfallsLoadError(t *testing.T) {
+	_, _, appLog, _ := runWithTwoPitfalls(t, nil, errors.New(`load pitfalls "pitfalls/scaleway.yaml": parse error`))
+
+	assert.Contains(t, appLog, `"event":"pitfall_load_error"`)
+	assert.Contains(t, appLog, "pitfalls/scaleway.yaml")
+}
+
+// A failure raised after the generator returned but before generated/ is
+// written still matches: the generated files are checked in memory.
+func TestRecordPitfallUsageMatchesFilesNeverWritten(t *testing.T) {
+	carried := []generator.PitfallEntry{{Resource: "scaleway_instance_server", Rule: usageIPv6Rule, File: "scaleway.yaml"}}
+	generated := &generator.GeneratedCode{
+		Files:    map[string][]byte{"main.tf": []byte(`resource "scaleway_instance_server" "web" { enable_ipv6 = true }`)},
+		Metadata: generator.GenerationMetadata{Phases: []generator.PhaseResult{{Name: generator.PhaseGenerateHCL, Pitfalls: carried}}},
+	}
+	failures := []FailureSummary{{Layer: "run", Stage: "iteration_1_generate", Check: "generate", Detail: "validate generated files: scaleway_instance_server.web is refused"}}
+	runtime := &CommandRuntime{Logger: NewAppLogger(&bytes.Buffer{})}
+
+	rendered := recordPitfallUsage(runtime, "run-1", generated, failures, nil)
+
+	assert.Equal(t, []runstore.RenderedPitfall{{ID: generator.PitfallID(carried[0]), File: "scaleway.yaml"}}, rendered)
+	assert.Equal(t, generator.PitfallID(carried[0]), failures[0].MatchesPitfall)
 }

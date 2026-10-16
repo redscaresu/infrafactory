@@ -37,10 +37,11 @@ type FailureSummary struct {
 	Command  string `json:"command,omitempty"`
 	Resource string `json:"resource,omitempty"`
 	Detail   string `json:"detail"`
-	// MatchesPitfall is the generator.PitfallID of a pitfall rendered
-	// into this iteration's prompt that the failing HCL breaks
-	// (generator.MatchBrokenPitfall): the rule was there and the failure
-	// happened anyway. Empty when none matched.
+	// MatchesPitfall is the generator.PitfallID of a pitfall this
+	// iteration's prompt carried whose rule the failing resource's own
+	// block in the generated files breaks (generator.MatchBrokenPitfall):
+	// the rule was there and the failure happened anyway. Empty when none
+	// matched.
 	MatchesPitfall string `json:"matches_pitfall,omitempty"`
 	// Origin is the layer that produced the failure (mock_deploy,
 	// sandbox_deploy, ...) before a run rewrites Layer to "run" (a

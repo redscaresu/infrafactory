@@ -36,10 +36,12 @@ func TestAWSPromptsCarryTheAMIIDThroughBothAdapters(t *testing.T) {
 
 	renderers := map[string]func(string) (string, error){
 		"claude": func(phase string) (string, error) {
-			return claude.renderPhasePrompt(phase, req, nil, nil, "")
+			prompt, _, err := claude.renderPhasePrompt(phase, req, nil, nil, "", nil)
+			return prompt, err
 		},
 		"openrouter": func(phase string) (string, error) {
-			return openRouter.renderPhasePrompt(phase, req, nil, nil, "")
+			prompt, _, err := openRouter.renderPhasePrompt(phase, req, nil, nil, "", nil)
+			return prompt, err
 		},
 	}
 	for name, render := range renderers {

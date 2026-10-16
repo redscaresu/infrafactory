@@ -84,9 +84,12 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 	phaseOutput := map[string]string{}
 	lastFiles := map[string][]byte{}
 	var filteredSchema string
+	// Read once per generation; on an error the prompts carry none and
+	// the metadata says why.
+	pitfalls, pitfallsErr := LoadRenderedPitfalls(g.cfg.PitfallsDir, req.Cloud)
 
 	for i, phase := range g.cfg.Phases {
-		prompt, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles, filteredSchema)
+		prompt, carried, err := g.renderPhasePrompt(phase, req, phaseOutput, lastFiles, filteredSchema, pitfalls)
 		if err != nil {
 			return nil, err
 		}
@@ -98,9 +101,10 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 
 		phaseOutput[phase] = text
 		phaseResults = append(phaseResults, PhaseResult{
-			Name:   phase,
-			Prompt: []byte(prompt),
-			Output: []byte(text),
+			Name:     phase,
+			Prompt:   []byte(prompt),
+			Output:   []byte(text),
+			Pitfalls: carried,
 		})
 
 		switch phase {
@@ -145,8 +149,9 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 	result := &GeneratedCode{
 		Files: lastFiles,
 		Metadata: GenerationMetadata{
-			Generator: AgentTypeOpenRouter,
-			Phases:    phaseResults,
+			Generator:   AgentTypeOpenRouter,
+			Phases:      phaseResults,
+			PitfallsErr: pitfallsErr,
 		},
 	}
 	if err := result.Validate(); err != nil {
@@ -155,13 +160,12 @@ func (g *OpenRouterSeedGenerator) Generate(ctx context.Context, req Request) (*G
 	return result, nil
 }
 
-func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte, filteredSchema string) (string, error) {
+func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, outputs map[string]string, files map[string][]byte, filteredSchema string, pitfalls []PitfallEntry) (string, []PitfallEntry, error) {
 	fileName, err := phaseTemplateFile(phase)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	templatePath := resolvePromptTemplatePath(g.cfg.PromptsDir, req.Cloud, fileName)
-	pitfalls, _ := LoadPitfalls(g.cfg.PitfallsDir, req.Cloud)
 
 	ctx := PromptContext{
 		ScenarioYAML:       string(req.ScenarioYAML),
@@ -173,11 +177,10 @@ func (g *OpenRouterSeedGenerator) renderPhasePrompt(phase string, req Request, o
 		FeedbackJSON:       string(req.FeedbackJSON),
 		ProviderSchema:     filteredSchema,
 		Layer3Guidance:     layer3Guidance(req.Layer3Enabled),
-		Pitfalls:           pitfalls,
 		UserDataLine:       req.UserDataLine,
 		AMIID:              req.AMIID,
 	}
-	return RenderPromptFile(phase, templatePath, ctx)
+	return renderPhaseWithPitfalls(phase, templatePath, ctx, pitfalls)
 }
 
 func (g *OpenRouterSeedGenerator) runPhaseWithRetries(ctx context.Context, phase string, prompt string) (string, error) {

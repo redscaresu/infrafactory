@@ -56,10 +56,12 @@ func phase2Renderers(t *testing.T, root string) map[string]func(Request) (string
 
 	return map[string]func(Request) (string, error){
 		"claude": func(req Request) (string, error) {
-			return claude.renderPhasePrompt(PhaseGenerateHCL, req, nil, nil, "")
+			prompt, _, err := claude.renderPhasePrompt(PhaseGenerateHCL, req, nil, nil, "", nil)
+			return prompt, err
 		},
 		"openrouter": func(req Request) (string, error) {
-			return openRouter.renderPhasePrompt(PhaseGenerateHCL, req, nil, nil, "")
+			prompt, _, err := openRouter.renderPhasePrompt(PhaseGenerateHCL, req, nil, nil, "", nil)
+			return prompt, err
 		},
 	}
 }

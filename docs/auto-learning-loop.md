@@ -110,20 +110,25 @@ Diagnostic protocol when a run exits without learning:
 ## Did a pitfall prevent the repeat?
 
 Each run records which pitfalls its prompts carried and whether a failure happened in spite of one.
-An entry's id is `generator.PitfallID`: a hash of cloud, resource and rule text, so the same rule
-keeps its id across runs and any edit to it is a new id.
+An entry's id is `generator.PitfallID`: a hash of its scope, resource and rule text. The scope is
+the cloud for an entry from `<cloud>.yaml` and `common` for one from `common.yaml`, so the same
+rule keeps its id across runs (a common rule across clouds too) and any edit to it is a new id.
 
-- `run.json` → `pitfalls_rendered`: the id of every entry whose line appears in a prompt the
-  generator returned (`generator.PitfallsInPrompts`), in the order first seen. A generation that
-  fails before returning records none; pitfalls learned mid-run join from the next iteration.
-- `iterations/<n>/iteration.json` → each failure's `matches_pitfall`: the id of an entry rendered
-  into that iteration's prompt, for the failure's resource type, whose rule the failing HCL breaks
-  (`generator.MatchBrokenPitfall`). The rule was in the prompt and the failure happened anyway.
+- `run.json` → `pitfalls_rendered`: each entry a generation prompt carried, as `{id, file}`, in the
+  order first rendered. The adapter reports what it rendered into each phase
+  (`PhaseResult.Pitfalls`); a generation that fails before returning records none. Pitfalls
+  learned mid-run join from the next iteration. If the pitfalls could not be loaded, the prompts
+  carried none and app.log has a `pitfall_load_error` event saying why.
+- `iterations/<n>/iteration.json` → each failure's `matches_pitfall`: the id of an entry that
+  iteration's prompt carried whose rule the failing resource's own block breaks
+  (`generator.MatchBrokenPitfall`). The block is found by the failure's address (module path and
+  index stripped) in the generated files, so a failure raised before `generated/` is written still
+  matches. The rule was in the prompt and the failure happened anyway.
 
-Only an avoid rule can be judged against HCL, so only avoid rules ever match: it is broken when a
-block of its type sets every attribute it names to something other than a literal off value. Both
-fields are omitted when empty, so a run recorded before them reads the same. Neither changes what
-is learned, kept or discarded.
+Only an avoid rule can be judged against HCL, so only avoid rules ever match: it is broken when the
+block sets every attribute it names to something other than a literal off value (`setsAll`, the
+same test the avoid check applies to a shape). Both fields are omitted when empty, so a run
+recorded before them reads the same. Neither changes what is learned, kept or discarded.
 
 ## Worked example: aws-subnet `map_public_ip_on_launch`
 

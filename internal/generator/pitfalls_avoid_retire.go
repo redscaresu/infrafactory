@@ -384,26 +384,63 @@ func checkStoredShape(pitfallsDir string, req AvoidRetirement) error {
 // attribute to something other than a literal false, "false", null or "".
 // A shape that sets an attribute off does not exercise it.
 func shapeSetsAttributes(dir, resource string, attrs []string) error {
-	files, err := filepath.Glob(filepath.Join(dir, "*.tf"))
+	files, err := readTFFiles(dir)
 	if err != nil {
 		return err
 	}
-	for _, path := range files {
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		file, diags := hclsyntax.ParseConfig(src, filepath.Base(path), hcl.InitialPos)
-		if diags.HasErrors() {
-			return fmt.Errorf("parse shape: %s", diags.Error())
-		}
-		for _, b := range file.Body.(*hclsyntax.Body).Blocks {
-			if b.Type == "resource" && len(b.Labels) == 2 && b.Labels[0] == resource && setsAll(b.Body, attrs) {
-				return nil
-			}
+	blocks, err := resourceBlocks(files, resource)
+	if err != nil {
+		return fmt.Errorf("parse shape: %w", err)
+	}
+	for _, b := range blocks {
+		if setsAll(b.Body, attrs) {
+			return nil
 		}
 	}
 	return fmt.Errorf("no %s block in the shape sets every attribute of %v", resource, attrs)
+}
+
+// readTFFiles reads the *.tf files directly under dir, keyed by name.
+func readTFFiles(dir string) (map[string][]byte, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.tf"))
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string][]byte, len(paths))
+	for _, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		files[filepath.Base(path)] = src
+	}
+	return files, nil
+}
+
+// resourceBlocks parses every *.tf file in files, in name order, and
+// returns its resource blocks of resourceType. Any file that does not
+// parse is an error.
+func resourceBlocks(files map[string][]byte, resourceType string) ([]*hclsyntax.Block, error) {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		if strings.HasSuffix(name, ".tf") {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	var blocks []*hclsyntax.Block
+	for _, name := range names {
+		file, diags := hclsyntax.ParseConfig(files[name], name, hcl.InitialPos)
+		if diags.HasErrors() {
+			return nil, fmt.Errorf("%s", diags.Error())
+		}
+		for _, b := range file.Body.(*hclsyntax.Body).Blocks {
+			if b.Type == "resource" && len(b.Labels) == 2 && b.Labels[0] == resourceType {
+				blocks = append(blocks, b)
+			}
+		}
+	}
+	return blocks, nil
 }
 
 func setsAll(body *hclsyntax.Body, attrs []string) bool {
