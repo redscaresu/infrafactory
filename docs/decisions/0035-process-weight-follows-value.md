@@ -43,6 +43,15 @@ by the PR that finishes it. No per-PR edit to a shared file remains, so the hygi
 requires `STATUS.md` on code changes; it checks each story's `status` instead. A `ready` story is
 also the brief an agent works from, so briefs are reviewable files rather than prompt text.
 
+## Amendment — 2026-10-16
+
+§1 has one exception. A PR that changes only board files (`scripts/ci_board_only.sh` holds the
+list) used to wait about ten minutes for the full suite. Its `test`, `aws-e2e` and `govulncheck`
+jobs now print the changed files and end green, except that `test` still runs the doc link test,
+because board files link to each other. The jobs still start and report: `test` and `aws-e2e` are
+required checks, and a job a `paths` filter skips never reports. A PR the script cannot confirm as
+board-only runs in full, and so does every push to main.
+
 ## Consequences
 
 - A broken change in one package can pass pre-commit and fail in CI. That is where it was
