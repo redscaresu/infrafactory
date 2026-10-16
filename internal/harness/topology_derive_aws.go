@@ -31,9 +31,14 @@ type awsMockState struct {
 			DestinationCidrBlock string `json:"destination_cidr_block"`
 			GatewayID            string `json:"gateway_id"`
 		} `json:"routes"`
+		RouteTables []struct {
+			ID    string `json:"id"`
+			VPCID string `json:"vpc_id"`
+		} `json:"route_tables"`
 		RouteTableAssociations []struct {
 			RouteTableID string `json:"route_table_id"`
 			SubnetID     string `json:"subnet_id"`
+			Main         bool   `json:"main"`
 		} `json:"route_table_associations"`
 	} `json:"ec2"`
 }
@@ -66,8 +71,8 @@ type awsIngress struct {
 // by a single-port tcp ingress rule with a CIDR source. A key is true
 // only when some instance has that port open to 0.0.0.0/0 on one of its
 // own groups, a public IPv4 address (the probe dials
-// aws_instance.public_ip), and a subnet whose associated route table
-// sends 0.0.0.0/0 to an internet gateway of the subnet's VPC. Each false
+// aws_instance.public_ip), and a subnet whose route table sends
+// 0.0.0.0/0 to an internet gateway of the subnet's VPC. Each false
 // key's diagnostic names the first failing condition; diagnostics
 // ["compute"] covers probes on ports with no key. Connectivity is empty.
 func deriveTopologyAWS(stateJSON []byte) ([]byte, map[string]string, error) {
@@ -176,10 +181,9 @@ func awsInstanceUnreachable(state *awsMockState, byGroup map[string]awsIngress, 
 	return awsSubnetUnrouted(state, inst.SubnetID)
 }
 
-// awsSubnetUnrouted returns "" when the subnet's explicitly associated
-// route table sends 0.0.0.0/0 to an internet gateway of the subnet's
-// VPC. fakeaws exports no main-table flag, so an unassociated subnet
-// counts as unrouted.
+// awsSubnetUnrouted returns "" when the subnet's route table sends
+// 0.0.0.0/0 to an internet gateway of the subnet's VPC. As in AWS, a
+// subnet with no explicit association uses its VPC's main route table.
 func awsSubnetUnrouted(state *awsMockState, subnetID string) string {
 	vpcID := ""
 	for _, s := range state.EC2.Subnets {
@@ -189,12 +193,15 @@ func awsSubnetUnrouted(state *awsMockState, subnetID string) string {
 	}
 	tableID := ""
 	for _, a := range state.EC2.RouteTableAssociations {
-		if a.SubnetID == subnetID {
+		if a.SubnetID != "" && a.SubnetID == subnetID { // a main or an edge association has no subnet
 			tableID = a.RouteTableID
 		}
 	}
 	if tableID == "" {
-		return fmt.Sprintf("subnet %s has no route table association", subnetID)
+		tableID = awsStateMainRouteTable(state, vpcID)
+	}
+	if tableID == "" {
+		return fmt.Sprintf("subnet %s has no route table association and vpc %s has no main route table", subnetID, vpcID)
 	}
 	for _, r := range state.EC2.Routes {
 		if r.RouteTableID != tableID || r.DestinationCidrBlock != "0.0.0.0/0" {
@@ -207,6 +214,24 @@ func awsSubnetUnrouted(state *awsMockState, subnetID string) string {
 		}
 	}
 	return fmt.Sprintf("route table %s of subnet %s has no 0.0.0.0/0 route to an internet gateway of %s", tableID, subnetID, vpcID)
+}
+
+// awsStateMainRouteTable returns the ID of vpcID's main route table, or "".
+func awsStateMainRouteTable(state *awsMockState, vpcID string) string {
+	if vpcID == "" {
+		return ""
+	}
+	for _, a := range state.EC2.RouteTableAssociations {
+		if !a.Main {
+			continue
+		}
+		for _, rt := range state.EC2.RouteTables {
+			if rt.ID == a.RouteTableID && rt.VPCID == vpcID {
+				return rt.ID
+			}
+		}
+	}
+	return ""
 }
 
 // awsComputeFallback explains a probe on a port with no compute key.
