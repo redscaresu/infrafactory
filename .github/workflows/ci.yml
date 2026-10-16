@@ -21,7 +21,103 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Decides once whether a PR changes only board files
+  # (scripts/ci_board_only.sh). test-full, aws-e2e-full and govulncheck are
+  # skipped only when this job succeeded and said skip, so a failure here, or
+  # a push to main (which skips this job), runs every job in full.
+  board:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+      report: ${{ steps.check.outputs.report }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The diff needs the merge base of the PR's base and head.
+          fetch-depth: 0
+
+      - name: Board-only check
+        id: check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if report="$(bash scripts/ci_board_only.sh "$BASE_SHA" "$HEAD_SHA")"; then
+            # Every line here is the script's own or a board path, so none
+            # can be the delimiter.
+            { echo "skip=true"; echo "report<<REPORT_END"; echo "$report"; echo "REPORT_END"; } >> "$GITHUB_OUTPUT"
+          fi
+          echo "$report"
+
+  # Board files link to each other, so a board-only PR still runs the doc
+  # link test. `go test` exits 0 when the test no longer exists, so the step
+  # passes only on its PASS line.
+  doc-links:
+    needs: board
+    if: needs.board.outputs.skip == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Doc links
+        run: |
+          go test ./internal/generator -run '^TestDocLinksResolve$' -count=1 -v | tee "$RUNNER_TEMP/doc-links.log"
+          grep -q '^--- PASS: TestDocLinksResolve ' "$RUNNER_TEMP/doc-links.log"
+
+  # The required checks are `test` and `aws-e2e`, so each always runs and
+  # reports. A board-only PR passes on the board report (and, for test, the
+  # doc link test); every other run passes only when its full job passed.
   test:
+    needs: [board, doc-links, test-full]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        env:
+          SKIP: ${{ needs.board.result == 'success' && needs.board.outputs.skip == 'true' }}
+          REPORT: ${{ needs.board.outputs.report }}
+          DOC_LINKS: ${{ needs.doc-links.result }}
+          FULL: ${{ needs.test-full.result }}
+        run: |
+          if [ "$SKIP" = true ]; then
+            echo "$REPORT"
+            echo "doc-links: $DOC_LINKS"
+            [ "$DOC_LINKS" = success ]
+          else
+            echo "test-full: $FULL"
+            [ "$FULL" = success ]
+          fi
+
+  aws-e2e:
+    needs: [board, aws-e2e-full]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        env:
+          SKIP: ${{ needs.board.result == 'success' && needs.board.outputs.skip == 'true' }}
+          REPORT: ${{ needs.board.outputs.report }}
+          FULL: ${{ needs.aws-e2e-full.result }}
+        run: |
+          if [ "$SKIP" = true ]; then
+            echo "$REPORT"
+          else
+            echo "aws-e2e-full: $FULL"
+            [ "$FULL" = success ]
+          fi
+
+  test-full:
+    needs: board
+    if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
     env:
       # M78 — share provider downloads across runs (~200MB saved per
@@ -31,72 +127,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # A PR that changes only board files (scripts/ci_board_only.sh) skips
-      # every step that checks steps.board.outputs.skip. A push to main does
-      # not run this step, so every step runs.
-      - name: Board-only check
-        id: board
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # The checkout is one commit deep; the diff needs the merge base. A
-          # fetch that fails or hangs leaves it missing, so the job runs in full.
-          timeout 180 git fetch --no-tags --quiet --unshallow origin "$BASE_SHA" "$HEAD_SHA" || echo "fetch failed"
-          if bash scripts/ci_board_only.sh "$BASE_SHA" "$HEAD_SHA"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Test the board-only check
+        run: bash scripts/ci_board_only_test.sh
 
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      # Board files link to each other and this test checks those links, so
-      # a board-only PR still runs it. `go test` exits 0 when the test no
-      # longer exists, so the step passes only on its PASS line.
-      - name: Doc links (board-only PR)
-        if: steps.board.outputs.skip == 'true'
-        run: |
-          go test ./internal/generator -run '^TestDocLinksResolve$' -count=1 -v | tee "$RUNNER_TEMP/doc-links.log"
-          grep -q '^--- PASS: TestDocLinksResolve ' "$RUNNER_TEMP/doc-links.log"
-
-      - name: Test the board-only check
-        if: steps.board.outputs.skip != 'true'
-        run: bash scripts/ci_board_only_test.sh
-
       - name: Setup Node
-        if: steps.board.outputs.skip != 'true'
         uses: actions/setup-node@v7.1.0
         with:
           node-version: '24'
 
       - name: Setup Terraform
-        if: steps.board.outputs.skip != 'true'
         uses: hashicorp/setup-terraform@v4
 
       # Layer 3 teardown runs tofu, and the test that reproduces a stack
       # whose config cannot evaluate skips without it.
       - name: Setup OpenTofu
-        if: steps.board.outputs.skip != 'true'
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_wrapper: false
 
       - name: Prepare Terraform plugin cache directory
-        if: steps.board.outputs.skip != 'true'
         run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - name: Cache Terraform providers
-        if: steps.board.outputs.skip != 'true'
         uses: actions/cache@v6
         with:
           path: ~/.terraform.d/plugin-cache
           key: terraform-plugin-cache-${{ runner.os }}-v1
 
       - name: Build UI (embedded via go:embed)
-        if: steps.board.outputs.skip != 'true'
         # cmd/infrafactory/embed.go requires `cmd/infrafactory/ui/build/` to
         # exist at compile time. Both are gitignored, so CI must produce
         # them before any `go test`/`go build` of cmd/infrafactory runs.
@@ -108,7 +171,6 @@ jobs:
           cp -R ui/build cmd/infrafactory/ui/
 
       - name: Run tests
-        if: steps.board.outputs.skip != 'true'
         # M71: -race detects genuine Go data races (the 3 fakes all
         # run with -race; infrafactory was the only repo without it
         # despite being the most concurrency-heavy).
@@ -134,7 +196,6 @@ jobs:
       # This project's whole discipline is that drift becomes a failed
       # test. A suite outside CI is a suite that drifts.
       - name: Run UI unit tests
-        if: steps.board.outputs.skip != 'true'
         # Needs Node >= 22.18 (pinned in ui/package.json engines).
         # `tests/ws.test.js` imports `../src/lib/ws.ts` directly, and
         # native TypeScript type-stripping is what makes that work --
@@ -145,7 +206,6 @@ jobs:
         run: cd ui && npm test
 
       - name: Install Playwright browsers
-        if: steps.board.outputs.skip != 'true'
         run: cd ui && npx playwright install --with-deps chromium
 
       # Playwright starts the app with `go run ./cmd/infrafactory`, which
@@ -153,11 +213,9 @@ jobs:
       # that start is a link rather than a full build -- otherwise the
       # 180s webServer timeout is spent compiling instead of testing.
       - name: Warm the Go build cache for the test server
-        if: steps.board.outputs.skip != 'true'
         run: go build -o /dev/null ./cmd/infrafactory
 
       - name: Run UI end-to-end tests
-        if: steps.board.outputs.skip != 'true'
         # No credential stubbing needed: the runner has none, and
         # `reuseExistingServer: !process.env.CI` means CI always starts
         # its own server rather than adopting whatever is on :4173.
@@ -199,10 +257,12 @@ jobs:
           path: ui/playwright-report/
           retention-days: 7
 
-  # AWS against fakeaws runs beside `test`, not after it: it was 506 of the
+  # AWS against fakeaws runs beside test-full, not after it: it was 506 of the
   # test job's 865 s, so CI (and every swarm story's wait on it) took the sum.
-  # It is a required check on main in its own right.
-  aws-e2e:
+  # Its required check is `aws-e2e` above.
+  aws-e2e-full:
+    needs: board
+    if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
     env:
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
@@ -210,60 +270,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # A PR that changes only board files (scripts/ci_board_only.sh) skips
-      # every step that checks steps.board.outputs.skip. A push to main does
-      # not run this step, so every step runs.
-      - name: Board-only check
-        id: board
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # The checkout is one commit deep; the diff needs the merge base. A
-          # fetch that fails or hangs leaves it missing, so the job runs in full.
-          timeout 180 git fetch --no-tags --quiet --unshallow origin "$BASE_SHA" "$HEAD_SHA" || echo "fetch failed"
-          if bash scripts/ci_board_only.sh "$BASE_SHA" "$HEAD_SHA"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Setup Go
-        if: steps.board.outputs.skip != 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
       - name: Setup Node
-        if: steps.board.outputs.skip != 'true'
         uses: actions/setup-node@v7.1.0
         with:
           node-version: '24'
 
       - name: Setup Terraform
-        if: steps.board.outputs.skip != 'true'
         uses: hashicorp/setup-terraform@v4
 
       # Layer 3 teardown runs tofu, and the test that reproduces a stack
       # whose config cannot evaluate skips without it.
       - name: Setup OpenTofu
-        if: steps.board.outputs.skip != 'true'
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2
         with:
           tofu_wrapper: false
 
       - name: Prepare Terraform plugin cache directory
-        if: steps.board.outputs.skip != 'true'
         run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - name: Cache Terraform providers
-        if: steps.board.outputs.skip != 'true'
         uses: actions/cache@v6
         with:
           path: ~/.terraform.d/plugin-cache
           key: terraform-plugin-cache-${{ runner.os }}-v1
 
       - name: Build UI (embedded via go:embed)
-        if: steps.board.outputs.skip != 'true'
         # cmd/infrafactory/embed.go requires `cmd/infrafactory/ui/build/` to
         # exist at compile time. Both are gitignored, so CI must produce
         # them before any `go test`/`go build` of cmd/infrafactory runs.
@@ -290,7 +326,6 @@ jobs:
       # exits 0 when a test skips or no longer exists, so the step passes
       # only on each test's own PASS line.
       - name: AWS against fakeaws
-        if: steps.board.outputs.skip != 'true'
         env:
           FAKEAWS_SHA: ece63928a1ecd9129aa7731544131ff8313009e3
           INFRAFACTORY_ENABLE_E2E: "1"
@@ -313,6 +348,8 @@ jobs:
           done
 
   govulncheck:
+    needs: board
+    if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     # S150-T1. Nothing scanned Go dependencies for known vulnerabilities
     # before this, so a vulnerable module could ship silently.
     #
@@ -326,29 +363,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # A PR that changes only board files (scripts/ci_board_only.sh) skips
-      # every step that checks steps.board.outputs.skip. A push to main does
-      # not run this step, so every step runs.
-      - name: Board-only check
-        id: board
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # The checkout is one commit deep; the diff needs the merge base. A
-          # fetch that fails or hangs leaves it missing, so the job runs in full.
-          timeout 180 git fetch --no-tags --quiet --unshallow origin "$BASE_SHA" "$HEAD_SHA" || echo "fetch failed"
-          if bash scripts/ci_board_only.sh "$BASE_SHA" "$HEAD_SHA"; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
       - name: Setup Go
-        if: steps.board.outputs.skip != 'true'
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Run govulncheck
-        if: steps.board.outputs.skip != 'true'
         # -tags noui, and NOT for convenience. cmd/infrafactory/embed.go
         # carries `//go:embed all:ui/build`, and that directory is generated
         # and gitignored, so on a clean runner it does not exist and

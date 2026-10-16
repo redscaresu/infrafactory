@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Usage: ci_board_only.sh <base-sha> <head-sha>
 #
-# Decides whether a pull request changes only board files: anything under
+# Decides whether a pull request changes only board files: a .md file under
 # docs/stories/, docs/epics/ or docs/hld/, or docs/Board.base or STATUS.md.
-# CI ends a job green without running it only when this exits 0. Every other
-# outcome (a non-board file, an empty list, a bad argument, a failed diff,
-# a crash) exits non-zero, and the job runs in full.
+# CI skips its full jobs only when this exits 0. Every other outcome (a
+# non-board file, an empty list, a bad argument, a failed diff, a crash)
+# exits non-zero, and they run.
 set -uo pipefail
 
 base="${1:-}"
@@ -31,7 +31,7 @@ echo "${files}"
 
 while IFS= read -r file; do
   case "${file}" in
-    docs/stories/* | docs/epics/* | docs/hld/* | docs/Board.base | STATUS.md) ;;
+    docs/stories/*.md | docs/epics/*.md | docs/hld/*.md | docs/Board.base | STATUS.md) ;;
     *) run_full "${file} is not a board file" ;;
   esac
 done <<< "${files}"

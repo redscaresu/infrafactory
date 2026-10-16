@@ -63,6 +63,7 @@ change_case "every board path gives skip" skip \
   docs/stories/b.md docs/epics/e.md docs/hld/h.md docs/Board.base STATUS.md
 change_case "one non-board file gives run" run docs/stories/b.md internal/x.go
 change_case "a board name outside the board gives run" run internal/STATUS.md
+change_case "a .go file under docs/stories/ gives run" run docs/stories/x_test.go
 change_case "an empty list gives run" run
 
 dir="$(new_repo)"
@@ -74,8 +75,13 @@ expect "a missing argument gives run" run "${dir}" "" "$(git -C "${dir}" rev-par
 
 dir="$(new_repo)"
 base="$(git -C "${dir}" rev-parse HEAD)"
-git -C "${dir}" mv internal/x.go docs/stories/x.go
-expect "a rename into docs/stories/ gives run" run "${dir}" "${base}" "$(commit_all "${dir}")"
+git -C "${dir}" mv internal/x.go docs/stories/x.md
+expect "a code file renamed to a board .md gives run" run "${dir}" "${base}" "$(commit_all "${dir}")"
+
+dir="$(new_repo)"
+base="$(git -C "${dir}" rev-parse HEAD)"
+git -C "${dir}" mv docs/stories/a.md docs/stories/renamed.md
+expect "a rename of a board .md gives skip" skip "${dir}" "${base}" "$(commit_all "${dir}")"
 
 if (( FAILURES > 0 )); then
   echo "${FAILURES} case(s) failed"
