@@ -59,43 +59,99 @@ func TestDeriveTopologyAWS_EachBrokenConditionIsUnreachable(t *testing.T) {
 	}
 }
 
-// A subnet with no explicit association uses its VPC's main route table.
-// No capture holds one (fakeaws CreateVpc makes none; only /mock/load
-// does), so the main association is added to the no_association capture
-// in the shape /mock/state exports it: main true, subnet_id "".
-func TestDeriveTopologyAWS_UnassociatedSubnetUsesMainRouteTable(t *testing.T) {
+// IDs in the no_association capture; captureRT routes 0.0.0.0/0 to the
+// capture's internet gateway.
+const (
+	captureVPC    = "vpc-b71d3b208fbb518c"
+	captureSubnet = "subnet-523903a5039f138a"
+	captureRT     = "rtb-49a2fa0d0dc9bb9f"
+)
+
+// awsAssoc is a route table association as /mock/state exports it: a
+// main one has no subnet.
+func awsAssoc(table, subnet, state string) map[string]any {
+	return map[string]any{"id": "rtbassoc-" + table, "route_table_id": table, "subnet_id": subnet, "gateway_id": "", "main": subnet == "", "state": state}
+}
+
+// awsFirst returns the first object of the ec2 list named key.
+func awsFirst(t *testing.T, ec2 map[string]any, key string) map[string]any {
+	t.Helper()
+	list, ok := ec2[key].([]any)
+	require.True(t, ok, "ec2.%s is not a list", key)
+	require.NotEmpty(t, list, "ec2.%s is empty", key)
+	first, ok := list[0].(map[string]any)
+	require.True(t, ok, "ec2.%s[0] is not an object", key)
+	return first
+}
+
+// awsCaptureWith returns the no_association capture with edit applied to
+// its ec2 object.
+func awsCaptureWith(t *testing.T, edit func(t *testing.T, ec2 map[string]any)) []byte {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "topology", "aws", "no_association.json"))
 	require.NoError(t, err)
-	withAssoc := func(vpcID, subnetID string, main bool) []byte {
-		var state map[string]any
-		require.NoError(t, json.Unmarshal(raw, &state))
-		ec2 := state["ec2"].(map[string]any)
-		rt := ec2["route_tables"].([]any)[0].(map[string]any)
-		rt["vpc_id"] = vpcID
-		ec2["route_table_associations"] = []any{map[string]any{
-			"id": "rtbassoc-0main", "route_table_id": rt["id"], "subnet_id": subnetID, "gateway_id": "", "main": main, "state": "",
-		}}
-		body, err := json.Marshal(state)
-		require.NoError(t, err)
-		return body
+	var state map[string]any
+	require.NoError(t, json.Unmarshal(raw, &state))
+	ec2, ok := state["ec2"].(map[string]any)
+	require.True(t, ok, "fixture ec2 is not an object")
+	edit(t, ec2)
+	body, err := json.Marshal(state)
+	require.NoError(t, err)
+	return body
+}
+
+// A subnet with no live explicit association uses its VPC's main route
+// table. No capture holds a main association (fakeaws CreateVpc makes
+// none; only /mock/load does), so each case adds associations to the
+// no_association capture in the shape /mock/state exports them.
+func TestDeriveTopologyAWS_UnassociatedSubnetUsesMainRouteTable(t *testing.T) {
+	assocs := func(as ...map[string]any) func(*testing.T, map[string]any) {
+		return func(t *testing.T, ec2 map[string]any) {
+			tables, ok := ec2["route_tables"].([]any)
+			require.True(t, ok, "ec2.route_tables is not a list")
+			ec2["route_tables"] = append(tables,
+				map[string]any{"id": "rtb-0private", "vpc_id": captureVPC},
+				map[string]any{"id": "rtb-0other", "vpc_id": "vpc-other"})
+			list := make([]any, len(as))
+			for i, a := range as {
+				list[i] = a
+			}
+			ec2["route_table_associations"] = list
+		}
 	}
-
-	const vpc = "vpc-b71d3b208fbb518c"
-	probe, diagnostics := deriveAWSState(t, withAssoc(vpc, "", true))
-	assert.Equal(t, map[string]bool{"compute:80": true}, probe)
-	assert.NotContains(t, diagnostics, "compute:80")
-
-	probe, diagnostics = deriveAWSState(t, withAssoc(vpc, "subnet-other", false))
-	assert.Equal(t, map[string]bool{"compute:80": false}, probe, "another subnet's association is not the main table")
-	assert.Contains(t, diagnostics["compute:80"], "no main route table")
-
-	probe, diagnostics = deriveAWSState(t, withAssoc("vpc-other", "", true))
-	assert.Equal(t, map[string]bool{"compute:80": false}, probe, "another VPC's main table does not route this subnet")
-	assert.Contains(t, diagnostics["compute:80"], "no main route table")
-
-	probe, diagnostics = deriveAWSState(t, raw)
-	assert.Equal(t, map[string]bool{"compute:80": false}, probe, "no main table: unrouted")
-	assert.Contains(t, diagnostics["compute:80"], "no main route table")
+	set := func(key, field, value string) func(*testing.T, map[string]any) {
+		return func(t *testing.T, ec2 map[string]any) {
+			assocs(awsAssoc(captureRT, "", ""))(t, ec2)
+			awsFirst(t, ec2, key)[field] = value
+		}
+	}
+	cases := map[string]struct {
+		edit func(*testing.T, map[string]any)
+		want string // "" when public
+	}{
+		"main table routes to the igw":            {assocs(awsAssoc(captureRT, "", "")), ""},
+		"explicit private table beats the main":   {assocs(awsAssoc(captureRT, "", ""), awsAssoc("rtb-0private", captureSubnet, "associated")), "route table rtb-0private of subnet " + captureSubnet + " has no 0.0.0.0/0 route"},
+		"no recorded state counts as associated":  {assocs(awsAssoc(captureRT, "", ""), awsAssoc("rtb-0private", captureSubnet, "")), "route table rtb-0private of subnet"},
+		"disassociated falls back to the main":    {assocs(awsAssoc(captureRT, "", ""), awsAssoc("rtb-0private", captureSubnet, "disassociated")), ""},
+		"another subnet's association isn't main": {assocs(awsAssoc(captureRT, "subnet-other", "associated")), "no main route table"},
+		"main table of another vpc":               {assocs(awsAssoc("rtb-0other", "", "")), "no main route table"},
+		"no main table":                           {func(*testing.T, map[string]any) {}, "has no route table association and vpc " + captureVPC + " has no main route table"},
+		"main table with no igw route":            {assocs(awsAssoc("rtb-0private", "", "")), "main route table rtb-0private of vpc " + captureVPC + " (subnet " + captureSubnet + " has no association) has no 0.0.0.0/0 route"},
+		"unknown subnet":                          {set("instances", "subnet_id", "subnet-gone"), "subnet subnet-gone is not in the mock state"},
+		"instance with no subnet":                 {set("instances", "subnet_id", ""), "instance i-ffa00b3537f8ccb4 has no subnet"},
+		"subnet with no vpc":                      {set("subnets", "vpc_id", ""), "subnet " + captureSubnet + " has no vpc"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			probe, diagnostics := deriveAWSState(t, awsCaptureWith(t, c.edit))
+			assert.Equal(t, map[string]bool{"compute:80": c.want == ""}, probe)
+			if c.want == "" {
+				assert.NotContains(t, diagnostics, "compute:80")
+				return
+			}
+			assert.Contains(t, diagnostics["compute:80"], c.want)
+		})
+	}
 }
 
 func TestDeriveTopologyAWS_UnderivedRulesEmitNoKey(t *testing.T) {

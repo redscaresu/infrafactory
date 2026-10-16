@@ -39,6 +39,7 @@ type awsMockState struct {
 			RouteTableID string `json:"route_table_id"`
 			SubnetID     string `json:"subnet_id"`
 			Main         bool   `json:"main"`
+			State        string `json:"state"`
 		} `json:"route_table_associations"`
 	} `json:"ec2"`
 }
@@ -178,27 +179,34 @@ func awsInstanceUnreachable(state *awsMockState, byGroup map[string]awsIngress, 
 	if inst.PublicIP == "" {
 		return fmt.Sprintf("instance %s has no public IPv4 address", id)
 	}
+	if inst.SubnetID == "" {
+		return fmt.Sprintf("instance %s has no subnet", id)
+	}
 	return awsSubnetUnrouted(state, inst.SubnetID)
 }
 
 // awsSubnetUnrouted returns "" when the subnet's route table sends
 // 0.0.0.0/0 to an internet gateway of the subnet's VPC. As in AWS, a
-// subnet with no explicit association uses its VPC's main route table.
+// subnet with no live explicit association uses its VPC's main route
+// table.
 func awsSubnetUnrouted(state *awsMockState, subnetID string) string {
-	vpcID := ""
+	vpcID, found := "", false
 	for _, s := range state.EC2.Subnets {
 		if s.ID == subnetID {
-			vpcID = s.VPCID
+			vpcID, found = s.VPCID, true
 		}
 	}
-	tableID := ""
-	for _, a := range state.EC2.RouteTableAssociations {
-		if a.SubnetID != "" && a.SubnetID == subnetID { // a main or an edge association has no subnet
-			tableID = a.RouteTableID
-		}
+	switch {
+	case !found:
+		return fmt.Sprintf("subnet %s is not in the mock state", subnetID)
+	case vpcID == "":
+		return fmt.Sprintf("subnet %s has no vpc", subnetID)
 	}
+	tableID := awsSubnetRouteTable(state, subnetID)
+	table := fmt.Sprintf("route table %s of subnet %s", tableID, subnetID)
 	if tableID == "" {
 		tableID = awsStateMainRouteTable(state, vpcID)
+		table = fmt.Sprintf("main route table %s of vpc %s (subnet %s has no association)", tableID, vpcID, subnetID)
 	}
 	if tableID == "" {
 		return fmt.Sprintf("subnet %s has no route table association and vpc %s has no main route table", subnetID, vpcID)
@@ -208,19 +216,31 @@ func awsSubnetUnrouted(state *awsMockState, subnetID string) string {
 			continue
 		}
 		for _, igw := range state.EC2.InternetGateways {
-			if igw.ID == r.GatewayID && vpcID != "" && igw.VPCID == vpcID {
+			if igw.ID == r.GatewayID && igw.VPCID == vpcID {
 				return ""
 			}
 		}
 	}
-	return fmt.Sprintf("route table %s of subnet %s has no 0.0.0.0/0 route to an internet gateway of %s", tableID, subnetID, vpcID)
+	return fmt.Sprintf("%s has no 0.0.0.0/0 route to an internet gateway of %s", table, vpcID)
+}
+
+// awsSubnetRouteTable returns the table of the subnet's live explicit
+// association, or "". A state of "associated" is live, and so is ""
+// (none recorded): fakeaws before #84 exports no state, and a loaded
+// association keeps the recording's, which may be absent.
+func awsSubnetRouteTable(state *awsMockState, subnetID string) string {
+	tableID := ""
+	for _, a := range state.EC2.RouteTableAssociations {
+		live := a.State == "" || a.State == "associated"
+		if live && a.SubnetID != "" && a.SubnetID == subnetID { // a main or an edge association has no subnet
+			tableID = a.RouteTableID
+		}
+	}
+	return tableID
 }
 
 // awsStateMainRouteTable returns the ID of vpcID's main route table, or "".
 func awsStateMainRouteTable(state *awsMockState, vpcID string) string {
-	if vpcID == "" {
-		return ""
-	}
 	for _, a := range state.EC2.RouteTableAssociations {
 		if !a.Main {
 			continue
