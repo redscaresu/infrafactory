@@ -273,6 +273,12 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 	var stderr bytes.Buffer
 	execCmd.Stdout = &stdout
 	execCmd.Stderr = &stderr
+	if cmd.Stdout != nil {
+		execCmd.Stdout = cmd.Stdout
+	}
+	if cmd.Stderr != nil {
+		execCmd.Stderr = cmd.Stderr
+	}
 
 	err = execCmd.Run()
 	// Run has waited for Cancel, so killFallback is safe to read here.

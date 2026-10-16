@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 )
 
 var ErrStaticStageFailed = errors.New("static stage failed")
@@ -32,6 +33,12 @@ type Command struct {
 	// specific binary passes an absolute Name. Setting both ReplaceEnv
 	// and StripEnv is an error.
 	ReplaceEnv bool
+	// Stdout and Stderr, when set, get the child's output as it is
+	// written, and CommandResult carries none of that stream; nil buffers
+	// it into CommandResult. The child gets no stdin (ADR-0042 § The
+	// family).
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // Layer2StripEnv is the StripEnv of every Layer 2 tofu command (static,

@@ -259,6 +259,49 @@ func TestAssumption_VariablePrecedenceMatchesGate(t *testing.T) {
 	assert.Equal(t, "var-file", applied("-var-file="+varFile), w.version)
 }
 
+// consoleDeadline bounds TestAssumption_ConsoleUnsetVariableReadsStdin's
+// one console run.
+const consoleDeadline = 2 * time.Minute
+
+// TestAssumption_ConsoleUnsetVariableReadsStdin: `tofu console
+// -input=false` in a root whose required variable has no value neither
+// errors nor leaves stdin alone. Offline, it reads `var.x` from a pipe,
+// answers `(known after apply)` and exits 0.
+//
+// Relied on by: rehearsal-passthrough, which kept console only if this
+// errored without reading stdin. It does not, so console is not in the
+// family and the runner takes no stdin (ADR-0042 § The family). A tofu
+// that fails this test reopens that call. ADR-0028.
+func TestAssumption_ConsoleUnsetVariableReadsStdin(t *testing.T) {
+	e2e.SkipUnlessEnabled(t)
+	_, err := exec.LookPath("tofu")
+	require.NoError(t, err, "tofu binary required for e2e")
+
+	w, env := newLoaderRoot(t)
+	w.write(t, "variables.tf", "variable \"x\" {\n  type = string\n}\n")
+	out, err := w.tofu(t, env, "init", "-input=false", "-no-color")
+	require.NoError(t, err, "%s\n%s", w.version, out)
+	vars := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, _ := strings.Cut(entry, "=")
+		vars[key] = value
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), consoleDeadline)
+	defer cancel()
+
+	result, err := cli.ExecRunner.Run(ctx, harness.Command{
+		Name:       "/bin/sh",
+		Args:       []string{"-c", `printf 'var.x\n' | exec tofu console -input=false -no-color`},
+		Dir:        w.dir,
+		Env:        vars,
+		ReplaceEnv: true,
+	})
+
+	require.NoError(t, ctx.Err(), "console ran past %s", consoleDeadline)
+	require.NoError(t, err, "%s: console errored with a required variable unset\n%s", w.version, result.Stderr)
+	assert.Equal(t, "(known after apply)\n", string(result.Stdout), "%s\n%s", w.version, result.Stderr)
+}
+
 // newLoaderRoot is a root with one valid output plus broken HCL in each
 // of broken, and the offline environment to run tofu in: both proxies at
 // the closed port, so any download fails.
