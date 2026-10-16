@@ -72,7 +72,7 @@ func outputModeFromCommand(cmd *cobra.Command) (OutputMode, error) {
 
 // TofuExitError carries the exit code of a tofu run that finished, so
 // infrafactory exits with tofu's own code. Tofu has already written its own
-// stderr, so ReportError prints nothing for it.
+// stderr, so ReportError prints nothing for a code that passes through.
 type TofuExitError struct {
 	ExitCode int
 }
@@ -82,7 +82,7 @@ func (e *TofuExitError) Error() string {
 }
 
 // passesThrough reports whether ExitCode can reach os.Exit unchanged: 0 would
-// report success for an error, and a code outside 1-255 is truncated by the OS.
+// report success for an error, and the OS keeps only the low 8 bits of the rest.
 func (e *TofuExitError) passesThrough() bool {
 	return e.ExitCode >= 1 && e.ExitCode <= 255
 }
