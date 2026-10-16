@@ -442,9 +442,9 @@ args]` run that tofu action in rehearsal `<id>`. `console` is refused (§ The fa
 
 Exactly one `<id>` goes before `--` and tofu's args go after it, so cobra keeps parsing
 infrafactory's own flags and the family's usage rules hold. A second `--` among tofu's args is
-refused. Any action outside the list, such as `refresh` or `state rm`, is a usage error, exit 2,
-that names it and lists the allowed ones. `rehearse state` with nothing after it prints help and
-exits 0, as the group does.
+refused. Any action outside the list is a usage error, exit 2, that names it: `rehearse refresh`
+lists every rehearse subcommand, and `rehearse state rm` lists the passthrough actions.
+`rehearse state` with nothing after it prints help and exits 0, as the group does.
 
 Each action allows only its own tofu flags, and any other is refused by name, exit 1. That covers
 `-var` and `-var-file` (the rehearsal passes prepare's var file and no other), `-input`, and every
@@ -453,8 +453,9 @@ take two positional arguments; the others take none. Plan, apply, destroy and im
 `-input=false`, then `-var-file=<id>/vars.tfvars` when that file exists, before the user's args.
 
 apply takes no saved plan file: the re-gate checks the source, not the configuration inside a
-saved plan, so apply runs from source. The runner gives tofu no stdin and a prompt reads EOF, so
-apply and destroy run with `-auto-approve`.
+saved plan, so apply runs from source. Nothing injects `-auto-approve`, so apply and destroy
+need `-- -auto-approve`: the runner gives tofu no stdin, and without it tofu fails at its
+approval prompt with EOF, exit 1 (tofu's own code).
 
 Only plan's `-out` takes a path. A relative one is joined onto the root, and no `..` element is
 allowed. Its dir must resolve inside the copy. The file must be absent or a regular file with one

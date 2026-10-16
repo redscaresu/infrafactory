@@ -432,7 +432,7 @@ func goldenPassthroughRoot(h *CommandTestHarness) *cobra.Command {
 		_, err := fmt.Fprintln(c.Stdout, "Plan: 1 to add, 0 to change, 0 to destroy.")
 		return harness.CommandResult{}, err
 	})
-	return passthroughRoot(rehearsePassthrough{runner: tofu, wd: repo})
+	return passthroughRoot(h.T, rehearsePassthrough{runner: tofu, wd: repo})
 }
 
 // normalizeGoldenWorkspace replaces the workspace, resolved, as prepare

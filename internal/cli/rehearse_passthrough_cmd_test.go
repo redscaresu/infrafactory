@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -20,17 +21,32 @@ import (
 	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
-// passthroughAllowed is the list every refused action's message names.
-const passthroughAllowed = "the rehearsal passes only apply, destroy, import, plan, state mv"
+// passthroughAllowed is the list a refused action under state names, and
+// rehearseCommands the list one under rehearse names.
+const (
+	passthroughAllowed = "the rehearsal passes only apply, destroy, import, plan, state mv"
+	rehearseCommands   = "rehearse has only apply, destroy, end, import, plan, prepare, read, state mv"
+)
 
 // passthroughRoot is the root command with the passthrough family built
-// from p.
-func passthroughRoot(p rehearsePassthrough) *cobra.Command {
+// from p. It first requires each command, and each one under it, to be
+// registered in NewRootCmd: Find returns the parent for a missing child,
+// so replacing what Find returned would pass with nothing registered.
+func passthroughRoot(t *testing.T, p rehearsePassthrough) *cobra.Command {
+	t.Helper()
 	root := NewRootCmd()
-	group, _, _ := root.Find([]string{"rehearse"})
+	group, _, err := root.Find([]string{"rehearse"})
+	require.NoError(t, err)
 	cmds := newRehearsePassthroughCmds(p)
 	for _, c := range cmds {
-		old, _, _ := group.Find([]string{c.Name()})
+		old, _, err := group.Find([]string{c.Name()})
+		require.NoError(t, err)
+		require.Equal(t, c.Name(), old.Name(), "rehearse %s is not registered", c.Name())
+		for _, sub := range c.Commands() {
+			found, _, err := old.Find([]string{sub.Name()})
+			require.NoError(t, err)
+			require.Equal(t, sub.Name(), found.Name(), "rehearse %s %s is not registered", c.Name(), sub.Name())
+		}
 		group.RemoveCommand(old)
 	}
 	group.AddCommand(cmds...)
@@ -40,25 +56,31 @@ func passthroughRoot(p rehearsePassthrough) *cobra.Command {
 }
 
 // Every tofu action outside the list, under state too, is a usage error
-// that names it, and tofu never runs.
+// that names it, and tofu never runs. Under rehearse the message lists
+// every rehearse subcommand, so a typo of prepare is not told that
+// prepare does not exist.
 func TestRehearsePassthroughRefusesUnlistedActions(t *testing.T) {
 	t.Parallel()
 	for _, action := range []string{
 		"init", "validate", "refresh", "output", "show", "taint", "untaint", "force-unlock", "workspace",
-		"providers", "get", "graph", "fmt", "test", "login", "logout", "version", "console",
+		"providers", "get", "graph", "fmt", "test", "login", "logout", "version", "console", "prepar",
 		"state list", "state rm", "state pull", "state push", "state show", "state replace-provider",
 	} {
 		t.Run(action, func(t *testing.T) {
 			t.Parallel()
 			stub := &passthroughStub{}
-			root := passthroughRoot(rehearsePassthrough{runner: stub, wd: t.TempDir()})
+			root := passthroughRoot(t, rehearsePassthrough{runner: stub, wd: t.TempDir()})
 			root.SetArgs(append(append([]string{"rehearse"}, strings.Fields(action)...), prepareID))
+			allowed := rehearseCommands
+			if strings.HasPrefix(action, "state ") {
+				allowed = passthroughAllowed
+			}
 
 			err := root.Execute()
 
 			require.Error(t, err)
 			assert.Equal(t, ExitCodeUsage, ExitCodeForError(err))
-			assert.Contains(t, err.Error(), fmt.Sprintf("unknown command %q: %s", action, passthroughAllowed))
+			assert.Contains(t, err.Error(), fmt.Sprintf("unknown command %q: %s", action, allowed))
 			assert.Empty(t, stub.calls)
 		})
 	}
@@ -77,7 +99,7 @@ func TestRehearsePassthroughCLIRefusals(t *testing.T) {
 	}{
 		{args: []string{"plan", prepareID, "--", "-var=x=y"}, code: ExitCodeRuntime, want: "tofu plan: -var is refused"},
 		{args: []string{"plan", prepareID, "--output", "json", "--", "-out=p"}, code: ExitCodeUsage, want: "--output json is refused: tofu plan writes its own output"},
-		{args: []string{"refresh", prepareID}, code: ExitCodeUsage, want: `unknown command "refresh": ` + passthroughAllowed},
+		{args: []string{"refresh", prepareID}, code: ExitCodeUsage, want: `unknown command "refresh": ` + rehearseCommands},
 		{args: []string{"state", "rm", prepareID}, code: ExitCodeUsage, want: `unknown command "state rm": ` + passthroughAllowed},
 		{args: []string{"state"}, code: ExitCodeSuccess, wantStdout: "infrafactory rehearse state [command]"},
 	} {
@@ -85,7 +107,7 @@ func TestRehearsePassthroughCLIRefusals(t *testing.T) {
 			t.Parallel()
 			repo, _ := regatePreparedLive(t, passthroughToken)
 			stub := &passthroughStub{}
-			root := passthroughRoot(rehearsePassthrough{runner: stub, wd: repo})
+			root := passthroughRoot(t, rehearsePassthrough{runner: stub, wd: repo})
 			stdout := &bytes.Buffer{}
 			root.SetOut(stdout)
 			root.SetArgs(append([]string{"rehearse"}, tc.args...))
@@ -123,7 +145,7 @@ func TestRehearsePassthroughCLIArgsAtDash(t *testing.T) {
 			t.Parallel()
 			repo, r := regatePreparedLive(t, passthroughToken)
 			stub := &passthroughStub{}
-			root := passthroughRoot(rehearsePassthrough{runner: stub, wd: repo})
+			root := passthroughRoot(t, rehearsePassthrough{runner: stub, wd: repo})
 			root.SetArgs(append([]string{"rehearse"}, tc.args...))
 
 			err := root.Execute()
@@ -141,6 +163,32 @@ func TestRehearsePassthroughCLIArgsAtDash(t *testing.T) {
 			assert.Equal(t, filepath.Join(dir, regateRoot), stub.calls[0].Dir)
 		})
 	}
+}
+
+// Tofu's own nonzero exit passes through the command and the root: a 2
+// after tofu ran is tofu's, and ReportError prints nothing for it, since
+// tofu has written its own stderr.
+func TestRehearsePassthroughCLIPassesTofusExitThrough(t *testing.T) {
+	t.Parallel()
+	repo, _ := regatePreparedLive(t, passthroughToken)
+	stub := &passthroughStub{answer: func(context.Context, int) (harness.CommandResult, error) {
+		return harness.CommandResult{ExitCode: 2}, errors.New("exit status 2")
+	}}
+	root := passthroughRoot(t, rehearsePassthrough{runner: stub, wd: repo})
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs([]string{"rehearse", "plan", prepareID, "--", "-detailed-exitcode"})
+
+	err := root.Execute()
+
+	require.Len(t, stub.calls, 1)
+	assert.Equal(t, 2, ExitCodeForError(err), "%v", err)
+	reported := &bytes.Buffer{}
+	assert.Equal(t, 2, ReportError(err, reported))
+	assert.Empty(t, reported.String())
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
 }
 
 // passthroughHelperRepoEnv names the repo TestRehearsePassthroughHelperProcess
@@ -163,7 +211,7 @@ func TestRehearsePassthroughHelperProcess(t *testing.T) {
 		c.Env[execHelperReadyEnv] = os.Getenv(execHelperReadyEnv)
 		return execCommandRunner{}.Run(ctx, c)
 	})
-	root := passthroughRoot(rehearsePassthrough{runner: runner, wd: repo})
+	root := passthroughRoot(t, rehearsePassthrough{runner: runner, wd: repo})
 	root.SetOut(os.Stdout)
 	root.SetArgs([]string{"rehearse", "plan", prepareID})
 	err := root.Execute()
