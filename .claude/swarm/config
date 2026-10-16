@@ -2,3 +2,5 @@
 lessons_file = AGENTS.md
 # The lead is a Claude session: dash puts what it can do in its own queue, apart from the user's.
 lead = session
+# goal-for-builders: each builder works to its Done when, bounded at 5 more turns (the spike's default). On for one epic as a trial; the user decides whether it stays.
+goal = 5
