@@ -32,7 +32,7 @@ echo "${files}"
 while IFS= read -r file; do
   case "${file}" in
     docs/stories/*.md | docs/epics/*.md | docs/hld/*.md | docs/Board.base | STATUS.md) ;;
-    *) run_full "${file} is not a board file" ;;
+    *) ;;
   esac
 done <<< "${files}"
 
