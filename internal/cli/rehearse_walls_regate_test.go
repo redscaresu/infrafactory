@@ -31,9 +31,32 @@ func regatePrepared(t *testing.T, args ...string) (string, openRehearsal) {
 // main.tf.
 func regatePreparedWith(t *testing.T, extra string, args ...string) (string, openRehearsal) {
 	t.Helper()
+	return preparedBy(t, stubWalls(rehearsePrepare{}), extra, args...)
+}
+
+// regatePreparedLive is regatePrepared with prepare's fakeaws on an
+// endListener whose /mock/requests takes an Authorization header when
+// accept does, given the recorded token. The record's port, and so the
+// provider override prepare wrote, name that listener, so
+// rehearsalEndProof passes when accept takes exactly "Bearer <token>".
+func regatePreparedLive(t *testing.T, accept func(auth, token string) bool, args ...string) (string, openRehearsal) {
+	t.Helper()
+	fakeaws := prepareStubFakeaws
+	fakeaws.Port = endListener(t, func(auth string) bool { return accept(auth, fakeaws.Token) })
+	p := stubWalls(rehearsePrepare{startFakeaws: func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+		return fakeaws, func() error { return nil }, nil
+	}})
+	return preparedBy(t, p, "", args...)
+}
+
+// preparedBy runs prepare p of envs/prod, with extra appended to its
+// main.tf and args, and returns the repo and the rehearsal rehearsalOpen
+// finds.
+func preparedBy(t *testing.T, p rehearsePrepare, extra string, args ...string) (string, openRehearsal) {
+	t.Helper()
 	repo := lockRepo(t, prepareLock, extra)
 	mustWriteFile(t, filepath.Join(repo, "prod.tfvars"), "instance_type = \"t3.micro\"\n")
-	run := runPrepareWith(t, stubWalls(rehearsePrepare{}), repo, func(context.Context, harness.Command) (harness.CommandResult, error) {
+	run := runPrepareWith(t, p, repo, func(context.Context, harness.Command) (harness.CommandResult, error) {
 		return harness.CommandResult{}, nil
 	}, args...)
 	require.NoError(t, run.err, run.stdout)
