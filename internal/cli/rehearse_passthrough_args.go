@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 // rehearsalPassthroughAction is what infrafactory lets the user pass to
@@ -22,7 +23,9 @@ type rehearsalPassthroughAction struct {
 }
 
 // rehearsalPassthroughActions is every passthrough action and its whole
-// allowlist. Any other flag is refused by name: -var and -var-file (the
+// allowlist. console is refused with every other action: tofu console
+// -input=false still reads an unset variable from stdin (ADR-0042 § The
+// family). Any other flag is refused by name: -var and -var-file (the
 // rehearsal passes prepare's var file and no other), -input (-input=false
 // is passed), and every flag that names a state, backup, config, chdir,
 // plugin or output path (-state, -state-out, -backup, -config, -chdir,
@@ -58,11 +61,6 @@ var rehearsalPassthroughActions = map[string]rehearsalPassthroughAction{
 		values:      []string{"lock-timeout"},
 		positionals: 2,
 	},
-	"console": {
-		bools:  []string{"lock", "compact-warnings", "consolidate-warnings", "consolidate-errors"},
-		values: []string{"lock-timeout"},
-		inject: true,
-	},
 }
 
 // rehearsalPassthroughDirs is where a passthrough action runs: root is
@@ -71,10 +69,6 @@ var rehearsalPassthroughActions = map[string]rehearsalPassthroughAction{
 type rehearsalPassthroughDirs struct {
 	root, boundary, rehearsal string
 }
-
-// rehearsalPassthroughOutSuffixes are -out names tofu would load as
-// configuration or variables on the next run.
-var rehearsalPassthroughOutSuffixes = []string{".tf", ".tf.json", ".tfvars", ".tfvars.json"}
 
 // rehearsalPassthroughArgs is tofu's argv for action with the user's args
 // (those after `--`), or the refusal naming what it refuses. -input=false
@@ -111,12 +105,13 @@ func rehearsalPassthroughArgs(action string, args []string, dirs rehearsalPassth
 }
 
 // check refuses any flag a does not allow, a value flag with no value and
-// a refused -out, and returns the positional arguments.
+// a refused -out, and returns the positional arguments. As in tofu's flag
+// parser, every arg after the first positional is a positional too.
 func (a rehearsalPassthroughAction) check(action string, args []string, dirs rehearsalPassthroughDirs) ([]string, error) {
 	var positionals []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if !strings.HasPrefix(arg, "-") {
+		if len(positionals) > 0 || !strings.HasPrefix(arg, "-") {
 			positionals = append(positionals, arg)
 			continue
 		}
@@ -146,9 +141,10 @@ func (a rehearsalPassthroughAction) check(action string, args []string, dirs reh
 // rehearsalPassthroughOut is why the plan file out is refused, or "".
 // A relative out is joined onto the root, tofu's cwd. No .. element is
 // allowed, since tofu resolves link/.. through the link where Join cleans
-// it away. Its dir must resolve to itself inside the boundary; the file
-// must be absent or a regular file, never a symlink; and its name must be
-// none tofu would load next run, nor one of infrafactory's own overrides.
+// it away. Its dir must resolve to itself inside the boundary. The file
+// must be absent or a regular file with one link: tofu truncates and
+// writes through a symlink or a hard link. Its path in the copy must pass
+// rehearsalWrittenPathProblem, and its name rehearsalEntryProblem.
 func rehearsalPassthroughOut(out string, dirs rehearsalPassthroughDirs) string {
 	if slices.Contains(strings.Split(filepath.ToSlash(out), "/"), "..") {
 		return "a .. element is refused"
@@ -168,20 +164,19 @@ func rehearsalPassthroughOut(out string, dirs rehearsalPassthroughDirs) string {
 		return "it is a symlink"
 	case !info.Mode().IsRegular():
 		return "it is not a regular file"
-	}
-	lower := strings.ToLower(filepath.Base(path))
-	if _, ours := (rehearsalRecord{}).ours(rehearsalRoot{})[lower]; ours {
-		return "it is infrafactory's own override"
-	}
-	if problem := rehearsalEntryProblem(lower); problem != "" {
-		return problem
-	}
-	for _, suffix := range rehearsalPassthroughOutSuffixes {
-		if strings.HasSuffix(lower, suffix) {
-			return fmt.Sprintf("tofu loads %s files from the root", suffix)
+	default:
+		if st, ok := info.Sys().(*syscall.Stat_t); !ok || st.Nlink != 1 {
+			return "it has another hard link, which tofu would write through"
 		}
 	}
-	return ""
+	rel, err := filepath.Rel(dirs.boundary, path)
+	if err != nil {
+		return fmt.Sprintf("cannot be checked: %v", err)
+	}
+	if problem := rehearsalWrittenPathProblem(rel); problem != "" {
+		return problem
+	}
+	return rehearsalEntryProblem(strings.ToLower(filepath.Base(path)))
 }
 
 // rehearsalPassthroughInjected is -input=false, then -var-file=<it> when

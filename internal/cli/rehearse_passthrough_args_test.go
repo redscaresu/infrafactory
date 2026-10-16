@@ -15,7 +15,8 @@ import (
 // passthroughFixture is a root at <rehearsal>/work/prod with the copy
 // <rehearsal>/work as its boundary, a dir outside the copy, and in the
 // root: link (a dir symlink to outside), leaflink (a file symlink to
-// outside/f) and old.tfplan (a regular file). withVars writes
+// outside/f), hardlink (a hard link to outside/f), old.tfplan (a regular
+// file) and the dirs .terraform and terraform.d. withVars writes
 // <rehearsal>/vars.tfvars. The replacer fills <root>, <outside> and
 // <var-file> in a case's args and wants.
 func passthroughFixture(t *testing.T, withVars bool) (rehearsalPassthroughDirs, *strings.Replacer) {
@@ -28,6 +29,9 @@ func passthroughFixture(t *testing.T, withVars bool) (rehearsalPassthroughDirs, 
 	require.NoError(t, os.MkdirAll(outside, 0o700))
 	mustWriteFile(t, filepath.Join(outside, "f"), "")
 	mustWriteFile(t, filepath.Join(dirs.root, "old.tfplan"), "")
+	require.NoError(t, os.Mkdir(filepath.Join(dirs.root, ".terraform"), 0o700))
+	require.NoError(t, os.Mkdir(filepath.Join(dirs.root, "terraform.d"), 0o700))
+	require.NoError(t, os.Link(filepath.Join(outside, "f"), filepath.Join(dirs.root, "hardlink")))
 	require.NoError(t, os.Symlink(outside, filepath.Join(dirs.root, "link")))
 	require.NoError(t, os.Symlink(filepath.Join(outside, "f"), filepath.Join(dirs.root, "leaflink")))
 	varFile := filepath.Join(rehearsal, rehearsalVarFile)
@@ -73,19 +77,26 @@ func TestRehearsePassthroughArgs(t *testing.T) {
 		{name: "-out=link/p", action: "plan", args: []string{"-out=link/p"}, refused: "-out=link/p is refused: its dir"},
 		{name: "-out symlink leaf", action: "plan", args: []string{"-out=leaflink"}, refused: "-out=leaflink is refused: it is a symlink"},
 		{name: "-out dir", action: "plan", args: []string{"-out=."}, refused: "-out=. is refused: it is not a regular file"},
-		{name: "-out=main.tf", action: "plan", args: []string{"-out=main.tf"}, refused: "-out=main.tf is refused: tofu loads .tf files"},
-		{name: "-out=MAIN.TF", action: "plan", args: []string{"-out=MAIN.TF"}, refused: "-out=MAIN.TF is refused: tofu loads .tf files"},
-		{name: "-out=x.auto.tfvars", action: "plan", args: []string{"-out=x.auto.tfvars"}, refused: "-out=x.auto.tfvars is refused: tofu loads .tfvars files"},
-		{name: "-out=x.tf.json", action: "plan", args: []string{"-out=x.tf.json"}, refused: "-out=x.tf.json is refused"},
-		{name: "-out=x.tfvars.json", action: "plan", args: []string{"-out=x.tfvars.json"}, refused: "-out=x.tfvars.json is refused"},
-		{name: "-out=infrafactory_override.tf", action: "plan", args: []string{"-out=infrafactory_override.tf"}, refused: "-out=infrafactory_override.tf is refused: it is infrafactory's own override"},
-		{name: "-out=infrafactory_aws_override.tf", action: "plan", args: []string{"-out=infrafactory_aws_override.tf"}, refused: "-out=infrafactory_aws_override.tf is refused: it is infrafactory's own override"},
-		{name: "-out=terraform.d", action: "plan", args: []string{"-out=terraform.d"}, refused: "-out=terraform.d is refused: a terraform.d entry"},
+		{name: "-out hard link", action: "plan", args: []string{"-out=hardlink"}, refused: "-out=hardlink is refused: it has another hard link"},
+		{name: "-out=main.tf", action: "plan", args: []string{"-out=main.tf"}, refused: "-out=main.tf is refused: a written path ending .tf is refused"},
+		{name: "-out=MAIN.TF", action: "plan", args: []string{"-out=MAIN.TF"}, refused: "-out=MAIN.TF is refused: a written path ending .tf is refused"},
+		{name: "-out=x.auto.tfvars", action: "plan", args: []string{"-out=x.auto.tfvars"}, refused: "-out=x.auto.tfvars is refused: a written path ending .tfvars is refused"},
+		{name: "-out=x.tf.json", action: "plan", args: []string{"-out=x.tf.json"}, refused: "-out=x.tf.json is refused: a written path ending .tf.json is refused"},
+		{name: "-out=x.tfvars.json", action: "plan", args: []string{"-out=x.tfvars.json"}, refused: "-out=x.tfvars.json is refused: a written path ending .tfvars.json is refused"},
+		{name: "-out=infrafactory_override.tf", action: "plan", args: []string{"-out=infrafactory_override.tf"}, refused: "-out=infrafactory_override.tf is refused"},
+		{name: "-out=infrafactory_aws_override.tf", action: "plan", args: []string{"-out=infrafactory_aws_override.tf"}, refused: "-out=infrafactory_aws_override.tf is refused"},
+		{name: "-out=.terraform.lock.hcl", action: "plan", args: []string{"-out=.terraform.lock.hcl"}, refused: "-out=.terraform.lock.hcl is refused: a written path is refused: tofu reads it"},
+		{name: "-out=.TERRAFORM.LOCK.HCL", action: "plan", args: []string{"-out=.TERRAFORM.LOCK.HCL"}, refused: "-out=.TERRAFORM.LOCK.HCL is refused: a written path is refused: tofu reads it"},
+		{name: "-out=.terraform/p", action: "plan", args: []string{"-out=.terraform/p"}, refused: "-out=.terraform/p is refused: a written path is refused: tofu reads it"},
+		{name: "-out=terraform.d/p", action: "plan", args: []string{"-out=terraform.d/p"}, refused: "-out=terraform.d/p is refused: a written path is refused: tofu reads it"},
+		{name: "-out=tests", action: "plan", args: []string{"-out=tests"}, refused: "-out=tests is refused: a tests entry is refused"},
 		{name: "-out with no value", action: "plan", args: []string{"-out"}, refused: "-out is refused: it needs a value"},
 		{name: "apply plan file", action: "apply", args: []string{"old.tfplan"}, vars: true, refused: `the plan file "old.tfplan" is refused`},
 		{name: "import one positional", action: "import", args: []string{"a"}, refused: "tofu import takes 2 positional arguments, not 1"},
 		{name: "plan positional", action: "plan", args: []string{"-lock", "false"}, refused: "tofu plan takes 0 positional arguments, not 1"},
+		{name: "flag after a positional", action: "import", args: []string{"a", "b", "-lock=false"}, refused: "tofu import takes 2 positional arguments, not 3"},
 		{name: "unknown action", action: "refresh", refused: "tofu refresh is refused"},
+		{name: "console", action: "console", refused: "tofu console is refused"},
 		{name: "state rm", action: "state rm", args: []string{"a"}, refused: "tofu state rm is refused"},
 
 		{name: "-out=p", action: "plan", args: []string{"-out=p"}, vars: true, want: []string{"plan", "-input=false", "<var-file>", "-out=p"}},
@@ -99,8 +110,6 @@ func TestRehearsePassthroughArgs(t *testing.T) {
 		{name: "destroy without vars", action: "destroy", want: []string{"destroy", "-input=false"}},
 		{name: "import", action: "import", args: []string{"aws_vpc.main", "vpc-1"}, vars: true, want: []string{"import", "-input=false", "<var-file>", "aws_vpc.main", "vpc-1"}},
 		{name: "import without vars", action: "import", args: []string{"aws_vpc.main", "vpc-1"}, want: []string{"import", "-input=false", "aws_vpc.main", "vpc-1"}},
-		{name: "console", action: "console", vars: true, want: []string{"console", "-input=false", "<var-file>"}},
-		{name: "console without vars", action: "console", want: []string{"console", "-input=false"}},
 		{name: "state mv", action: "state mv", args: []string{"-dry-run", "aws_vpc.a", "aws_vpc.b"}, vars: true, want: []string{"state", "mv", "-dry-run", "aws_vpc.a", "aws_vpc.b"}},
 	}
 	for _, tc := range cases {
@@ -146,7 +155,6 @@ func TestRehearsePassthroughArgsAllowlist(t *testing.T) {
 		},
 		"import":   {bools: []string{"lock", "no-color", "compact-warnings", "consolidate-warnings", "consolidate-errors"}, values: []string{"lock-timeout"}},
 		"state mv": {bools: []string{"dry-run", "lock"}, values: []string{"lock-timeout"}},
-		"console":  {bools: []string{"lock", "compact-warnings", "consolidate-warnings", "consolidate-errors"}, values: []string{"lock-timeout"}},
 	}
 	dirs, _ := passthroughFixture(t, false)
 	assert.ElementsMatch(t, slices.Collect(maps.Keys(allow)), slices.Collect(maps.Keys(rehearsalPassthroughActions)))
