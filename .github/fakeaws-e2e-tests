@@ -37,4 +37,5 @@ TestRehearsalAWSProviderTableMatchesSchema
 TestRehearsalFakeawsInstallAtPin
 TestRehearsalTeardown
 TestRehearsalWallsFailClosed
+TestRehearsePassthroughE2E
 TestRehearsePrepare
