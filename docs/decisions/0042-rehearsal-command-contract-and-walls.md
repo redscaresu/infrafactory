@@ -36,9 +36,13 @@ Two rules keep that true:
 - `rehearse prepare <dir> --account <id> --region <r> [--var-file f]` is decided here.
 - `rehearse read` is defined by ADR-0041, not redefined here.
 - `rehearse end <id>` is decided in § The walls: the family's last command.
-- `plan|apply|destroy|import|state mv|console`
+- `plan|apply|destroy|import|state mv`
   passthrough to rehearsal-passthrough; discover, load, check and the base-then-head loop to
   rehearsal-against-the-copy. Each amends this ADR when it lands.
+- `console` is left out, so `rehearse console` is an unknown subcommand. It would have stayed
+  only if `console -input=false` errored on an unset required variable without reading stdin,
+  but it reads `var.x` from a pipe and answers `(known after apply)`
+  (TestAssumption_ConsoleUnsetVariableReadsStdin). The runner streams output and takes no stdin.
 
 Exit codes are ADR-0002's: a usage error is 2, and every refusal is `command_failed`, exit 1. The
 family adds no error code.

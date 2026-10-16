@@ -314,8 +314,9 @@ gains a replace mode, tested so that `HOME`, `TF_CLI_CONFIG_FILE`, `TF_REATTACH_
 `AWS_IGNORE_CONFIGURED_ENDPOINT_URLS` never pass. The provider override (goal 7) is the first wall;
 the environment is the second.
 
-tofu is then a passthrough: `plan`, `apply`, `destroy`, `import`, `state mv`, `console`, with the
-work directory as `cwd` and `-out` bound inside it (review-2 M8), through the existing runner (one
+tofu is then a passthrough: `plan`, `apply`, `destroy`, `import`, `state mv` (`console` was
+dropped: ADR-0042 § The family), with the work directory as `cwd` and `-out` bound inside it
+(review-2 M8), through the existing runner (one
 Ctrl-C stops tofu cleanly, nothing reports success after an interrupt; #436, #438). `reset` restores
 the snapshot and the starting state; `end` stops this rehearsal's fakeaws by its recorded pid, then
 deletes the work directories, the recorded read, the state copies, the snapshot and the database

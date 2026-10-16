@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -139,10 +141,12 @@ func TestStripEnvKeysNoKeysIsIdentity(t *testing.T) {
 
 // execHelperEnv selects TestExecRunnerHelperProcess's role when the test
 // binary re-runs itself as a child process; execHelperReadyEnv names the
-// file a child creates once its SIGINT handler is installed.
+// file a child creates once its SIGINT handler is installed;
+// execHelperReleaseEnv names the file a "stream" child waits for.
 const (
-	execHelperEnv      = "INFRAFACTORY_EXEC_HELPER"
-	execHelperReadyEnv = "INFRAFACTORY_EXEC_HELPER_READY"
+	execHelperEnv        = "INFRAFACTORY_EXEC_HELPER"
+	execHelperReadyEnv   = "INFRAFACTORY_EXEC_HELPER_READY"
+	execHelperReleaseEnv = "INFRAFACTORY_EXEC_HELPER_RELEASE"
 )
 
 // helperCommand re-runs this test binary as TestExecRunnerHelperProcess
@@ -160,7 +164,10 @@ func helperCommand(role string) harness.Command {
 // guard, which cancels the runner's context on a signal; "count" stands in for tofu, printing how
 // many SIGINTs it saw; "ignore" prints each SIGINT and ignores it;
 // "replace-parent" is "parent" with its child in replace mode;
+// "stream-parent" is "parent" with its child writing to this stdout;
 // "unguarded" is "parent" with no signal guard, as live teardown has;
+// "stream" writes a line to stdout and one to stderr, then exits once the
+// release file exists;
 // "tree" is "ignore" with an "ignore" grandchild sharing its stdout, as a
 // provider plugin might.
 func TestExecRunnerHelperProcess(t *testing.T) {
@@ -169,7 +176,17 @@ func TestExecRunnerHelperProcess(t *testing.T) {
 		return
 	}
 	switch role {
-	case "parent", "replace-parent":
+	case "stream":
+		fmt.Println("out")
+		fmt.Fprintln(os.Stderr, "err")
+		release := os.Getenv(execHelperReleaseEnv)
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if _, err := os.Stat(release); err == nil {
+				os.Exit(0)
+			}
+		}
+		os.Exit(1)
+	case "parent", "replace-parent", "stream-parent":
 		// A guard, as runUnderSignals is: the first signal cancels ctx.
 		ctx, stop := notifyGuarded(context.Background(), signal.NotifyContext)
 		// Every signal this process gets: the terminal's, and any Run raised again.
@@ -181,11 +198,18 @@ func TestExecRunnerHelperProcess(t *testing.T) {
 			child.ReplaceEnv = true
 			child.Env[execHelperReadyEnv] = os.Getenv(execHelperReadyEnv)
 		}
+		if role == "stream-parent" {
+			child.Stdout = os.Stdout
+		}
 		result, err := execCommandRunner{}.Run(ctx, child)
 		stop()
 		time.Sleep(500 * time.Millisecond)
 		// Canceled only when the cancel signalled the child itself.
 		fmt.Printf("%s canceled=%t signals=%d", result.Stdout, errors.Is(err, context.Canceled), len(seen))
+		if role == "stream-parent" {
+			// The child wrote its count to this stdout, so the result holds none.
+			fmt.Printf(" buffered=%d", len(result.Stdout))
+		}
 		os.Exit(0)
 	case "unguarded":
 		// As live teardown is: nothing catches a signal.
@@ -267,6 +291,19 @@ func TestExecRunnerGroupInterruptReachesChildOnce(t *testing.T) {
 	require.NoError(t, parent.Wait())
 
 	assert.Equal(t, "interrupts=1 canceled=true signals=1", stdout.String())
+}
+
+// A streamed command is in its own process group too: the terminal's
+// Ctrl-C reaches it only as the runner's one SIGINT, and its output
+// reaches the caller's writer, not the result.
+func TestExecRunnerStreamingOneSIGINT(t *testing.T) {
+	t.Parallel()
+
+	parent, stdout, _ := startHelperParent(t, "stream-parent")
+	require.NoError(t, syscall.Kill(-parent.Process.Pid, syscall.SIGINT))
+	require.NoError(t, parent.Wait())
+
+	assert.Equal(t, "interrupts=1 canceled=true signals=1 buffered=0", stdout.String())
 }
 
 // A replace-mode command is in its own process group too, and hears the
@@ -392,6 +429,118 @@ func TestExecRunnerCancelSignalsTheChildsGroup(t *testing.T) {
 	assert.Less(t, time.Since(start), 5*time.Second, "the grandchild outlived the kill")
 }
 
+// A streamed command's output reaches the caller's writers while it
+// runs: through a copy for a plain writer, and for an *os.File, which is
+// what production passes, as the child's own descriptor. Run returns once
+// the child exits, and the result holds neither stream.
+func TestExecRunnerStreamsBeforeExit(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		pipe func(t *testing.T) (io.Reader, io.Writer)
+	}{
+		{"writer", func(t *testing.T) (io.Reader, io.Writer) {
+			r, w := io.Pipe()
+			t.Cleanup(func() { _ = w.Close() })
+			return r, w
+		}},
+		{"os.Pipe", func(t *testing.T) (io.Reader, io.Writer) {
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
+			return r, w
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdoutR, stdoutW := tc.pipe(t)
+			stderrR, stderrW := tc.pipe(t)
+			release := filepath.Join(t.TempDir(), "release")
+			cmd := helperCommand("stream")
+			cmd.Env[execHelperReleaseEnv] = release
+			cmd.Stdout, cmd.Stderr = stdoutW, stderrW
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			type ran struct {
+				result harness.CommandResult
+				err    error
+			}
+			done := make(chan ran, 1)
+			go func() {
+				result, err := execCommandRunner{}.Run(ctx, cmd)
+				done <- ran{result, err}
+			}()
+
+			assert.Equal(t, "out", readLine(t, stdoutR))
+			assert.Equal(t, "err", readLine(t, stderrR))
+			select {
+			case <-done:
+				t.Fatal("Run returned before the child exited")
+			default:
+			}
+
+			require.NoError(t, os.WriteFile(release, nil, 0o600))
+			select {
+			case got := <-done:
+				require.NoError(t, got.err)
+				assert.Empty(t, got.result.Stdout)
+				assert.Empty(t, got.result.Stderr)
+			case <-time.After(10 * time.Second):
+				t.Fatal("Run did not return once the child exited")
+			}
+		})
+	}
+}
+
+// readLine reads one line from r, failing the test after 10s.
+func readLine(t *testing.T, r io.Reader) string {
+	t.Helper()
+	line := make(chan string, 1)
+	go func() {
+		s, _ := bufio.NewReader(r).ReadString('\n')
+		line <- s
+	}()
+	select {
+	case s := <-line:
+		return strings.TrimSuffix(s, "\n")
+	case <-time.After(10 * time.Second):
+		t.Fatal("no line within 10s")
+		return ""
+	}
+}
+
+// A cancelled command never reports success, streamed or not: tofu
+// answers its one SIGINT by saving state and exiting 0, and Run still
+// returns the cancel.
+func TestExecRunnerStreamingCancelNeverSucceeds(t *testing.T) {
+	t.Parallel()
+
+	ready := filepath.Join(t.TempDir(), "ready")
+	cmd := helperCommand("count")
+	cmd.Env[execHelperReadyEnv] = ready
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for ctx.Err() == nil {
+			if _, err := os.Stat(ready); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	result, err := execCommandRunner{}.Run(ctx, cmd)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, result.ExitCode, "the child trapped SIGINT and exited 0")
+	assert.Equal(t, "interrupts=1", stdout.String())
+}
+
 // Every guard registers with signalGuards while it catches signals, so
 // Run never raises a signal again into it. Not parallel: the count is
 // process-wide.
@@ -476,6 +625,32 @@ func TestExecRunnerReplaceEnvPathFromEnvWins(t *testing.T) {
 	got := runEnv(t, harness.Command{Name: envBin, Env: map[string]string{"PATH": "/from-env"}, ReplaceEnv: true})
 
 	assert.Equal(t, envOutput("PATH=/from-env"), got)
+}
+
+// A streamed command's environment is replace mode's too: PATH and Env,
+// and nothing else of this process's. The keys are compared first, so a
+// failure prints names, never this process's values.
+func TestExecRunnerStreamingReplaceEnv(t *testing.T) {
+	t.Setenv("TF_CLI_ARGS", "planted")
+	var stdout bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := execCommandRunner{}.Run(ctx, harness.Command{
+		Name:       envBin,
+		Env:        map[string]string{"AWS_REGION": "us-east-1"},
+		ReplaceEnv: true,
+		Stdout:     &stdout,
+	})
+
+	require.NoError(t, err)
+	var keys []string
+	for _, line := range strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n") {
+		key, _, _ := strings.Cut(line, "=")
+		keys = append(keys, key)
+	}
+	require.Equal(t, []string{"PATH", "AWS_REGION"}, keys)
+	assert.Equal(t, envOutput("PATH="+os.Getenv("PATH"), "AWS_REGION=us-east-1"), stdout.String())
 }
 
 // Without ReplaceEnv the child inherits as it always has: this process's
