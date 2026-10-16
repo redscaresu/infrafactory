@@ -115,6 +115,11 @@ func TestExitCodeForErrorTofuExitCode(t *testing.T) {
 		{name: "carried -1", err: &TofuExitError{ExitCode: -1}, want: ExitCodeRuntime},
 		{name: "carried 256", err: &TofuExitError{ExitCode: 256}, want: ExitCodeRuntime},
 		{name: "carried 1000", err: &TofuExitError{ExitCode: 1000}, want: ExitCodeRuntime},
+		{name: "carried 3 wrapped", err: fmt.Errorf("x: %w", &TofuExitError{ExitCode: 3}), want: 3},
+		{name: "carried 2 joined with another failure", err: errors.Join(&TofuExitError{ExitCode: 2}, errors.New("tighten")), want: ExitCodeRuntime},
+		{name: "carried 2 beside another failure in one Errorf", err: fmt.Errorf("%w: %w", &TofuExitError{ExitCode: 2}, errors.New("tighten")), want: ExitCodeRuntime},
+		{name: "usage joined with carried 2", err: errors.Join(&CLIError{Code: errorCodeUsage, Err: errors.New("usage")}, &TofuExitError{ExitCode: 2}), want: ExitCodeUsage},
+		{name: "usage wrapping carried 3", err: &CLIError{Code: errorCodeUsage, Err: &TofuExitError{ExitCode: 3}}, want: ExitCodeUsage},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,6 +133,9 @@ func TestReportError(t *testing.T) {
 	t.Parallel()
 
 	usageErr := &CLIError{Op: "run", Code: errorCodeUsage, Err: errors.New("expected exactly 1 scenario path argument")}
+	carrierAndTighten := errors.Join(&TofuExitError{ExitCode: 2}, errors.New("tighten"))
+	usageAndCarrier := errors.Join(usageErr, &TofuExitError{ExitCode: 2})
+	usageWrapsCarrier := &CLIError{Op: "rehearse plan", Code: errorCodeUsage, Err: &TofuExitError{ExitCode: 3}}
 	cases := []struct {
 		name       string
 		err        error
@@ -140,6 +148,9 @@ func TestReportError(t *testing.T) {
 		{name: "tofu exit -1 is written", err: &TofuExitError{ExitCode: -1}, wantCode: ExitCodeRuntime, wantStderr: "tofu exited with code -1\n"},
 		{name: "usage error is written", err: usageErr, wantCode: ExitCodeUsage, wantStderr: usageErr.Error() + "\n"},
 		{name: "other error is written", err: errors.New("boom"), wantCode: ExitCodeRuntime, wantStderr: "boom\n"},
+		{name: "carrier joined with another failure is written", err: carrierAndTighten, wantCode: ExitCodeRuntime, wantStderr: carrierAndTighten.Error() + "\n"},
+		{name: "usage joined with carrier is written", err: usageAndCarrier, wantCode: ExitCodeUsage, wantStderr: usageAndCarrier.Error() + "\n"},
+		{name: "usage wrapping carrier is written", err: usageWrapsCarrier, wantCode: ExitCodeUsage, wantStderr: usageWrapsCarrier.Error() + "\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

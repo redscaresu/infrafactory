@@ -72,7 +72,7 @@ func outputModeFromCommand(cmd *cobra.Command) (OutputMode, error) {
 
 // TofuExitError carries the exit code of a tofu run that finished, so
 // infrafactory exits with tofu's own code. Tofu has already written its own
-// stderr, so ReportError prints nothing for a code that passes through.
+// stderr, so ReportError prints nothing when exitCodeFor passes the code through.
 type TofuExitError struct {
 	ExitCode int
 }
@@ -88,34 +88,40 @@ func (e *TofuExitError) passesThrough() bool {
 }
 
 func ExitCodeForError(err error) int {
-	if err == nil {
-		return ExitCodeSuccess
-	}
+	code, _ := exitCodeFor(err)
+	return code
+}
 
-	var tofuErr *TofuExitError
-	if errors.As(err, &tofuErr) {
-		if tofuErr.passesThrough() {
-			return tofuErr.ExitCode
-		}
-		return ExitCodeRuntime
+// ReportError writes err to w and returns the exit code for it. It writes
+// nothing only when that code is tofu's own, since tofu already explained it.
+func ReportError(err error, w io.Writer) int {
+	code, tofuReported := exitCodeFor(err)
+	if err != nil && !tofuReported {
+		fmt.Fprintln(w, err)
+	}
+	return code
+}
+
+// exitCodeFor returns the exit code for err and whether it is tofu's own. A
+// usage error anywhere in err gives 2. Tofu's code passes through only when
+// the carrier is err's one cause: errors.Unwrap stops at an error with more
+// than one (errors.Join, several %w), so a carrier beside another failure,
+// such as an interrupt, gives 1 and that failure is printed.
+func exitCodeFor(err error) (code int, tofuReported bool) {
+	if err == nil {
+		return ExitCodeSuccess, false
 	}
 
 	var cliErr *CLIError
 	if errors.As(err, &cliErr) && cliErr.Code == errorCodeUsage {
-		return ExitCodeUsage
+		return ExitCodeUsage, false
 	}
 
-	return ExitCodeRuntime
-}
-
-// ReportError writes err to w and returns the exit code for it. A tofu exit
-// code that passes through is not written: tofu already explained it. Any
-// other carried code is written, so an exit 1 is never silent.
-func ReportError(err error, w io.Writer) int {
-	var tofuErr *TofuExitError
-	quiet := errors.As(err, &tofuErr) && tofuErr.passesThrough()
-	if err != nil && !quiet {
-		fmt.Fprintln(w, err)
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if tofuErr, ok := e.(*TofuExitError); ok && tofuErr.passesThrough() {
+			return tofuErr.ExitCode, true
+		}
 	}
-	return ExitCodeForError(err)
+
+	return ExitCodeRuntime, false
 }
