@@ -568,23 +568,46 @@ func TestSignalGuardsAreCounted(t *testing.T) {
 // `sh -c env` would add PWD, SHLVL and _.
 const envBin = "/usr/bin/env"
 
-// runEnv runs cmd, an envBin command, and returns what it printed.
-func runEnv(t *testing.T, cmd harness.Command) string {
+// envNulArg makes envBin end each entry with NUL, not newline, so a value
+// holding a newline stays one entry.
+const envNulArg = "-0"
+
+// runEnv runs cmd, an envBin command, and returns the entries it printed.
+func runEnv(t *testing.T, cmd harness.Command) []string {
 	t.Helper()
+	cmd.Args = []string{envNulArg}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	result, err := execCommandRunner{}.Run(ctx, cmd)
 	require.NoError(t, err, "%s", result.Stderr)
-	return string(result.Stdout)
+	return envEntries(string(result.Stdout))
 }
 
-// envOutput is what envBin prints for entries.
-func envOutput(entries ...string) string {
-	var b strings.Builder
-	for _, entry := range entries {
-		b.WriteString(entry + "\n")
+// envEntries splits what envBin printed with envNulArg into its entries.
+func envEntries(out string) []string {
+	return strings.FieldsFunc(out, func(r rune) bool { return r == 0 })
+}
+
+// assertEnv checks the entries a child printed against want, in order. A
+// failure names keys and never prints a value: got can hold this
+// process's environment, and its secrets would land in the log.
+func assertEnv(t *testing.T, want, got []string) {
+	t.Helper()
+	if !assert.Equal(t, envKeys(want), envKeys(got), "env keys") {
+		return
 	}
-	return b.String()
+	for i, entry := range got {
+		key, _, _ := strings.Cut(entry, "=")
+		assert.True(t, entry == want[i], "env %s: the value differs", key)
+	}
+}
+
+func envKeys(entries []string) []string {
+	keys := make([]string, len(entries))
+	for i, entry := range entries {
+		keys[i], _, _ = strings.Cut(entry, "=")
+	}
+	return keys
 }
 
 // Replace mode passes PATH and the named variables, and nothing else of
@@ -607,7 +630,7 @@ func TestExecRunnerReplaceEnvPassesOnlyPathAndEnv(t *testing.T) {
 		ReplaceEnv: true,
 	})
 
-	assert.Equal(t, envOutput("PATH="+os.Getenv("PATH"), "AWS_REGION=us-east-1", "TF_IN_AUTOMATION=1"), got)
+	assertEnv(t, []string{"PATH=" + os.Getenv("PATH"), "AWS_REGION=us-east-1", "TF_IN_AUTOMATION=1"}, got)
 }
 
 // With no PATH to pass and nothing named, the child's environment is
@@ -616,7 +639,7 @@ func TestExecRunnerReplaceEnvWithNothingIsEmpty(t *testing.T) {
 	t.Setenv("PATH", "") // restores PATH after the test
 	require.NoError(t, os.Unsetenv("PATH"))
 
-	assert.Empty(t, runEnv(t, harness.Command{Name: envBin, ReplaceEnv: true}))
+	assertEnv(t, nil, runEnv(t, harness.Command{Name: envBin, ReplaceEnv: true}))
 }
 
 func TestExecRunnerReplaceEnvPathFromEnvWins(t *testing.T) {
@@ -624,12 +647,11 @@ func TestExecRunnerReplaceEnvPathFromEnvWins(t *testing.T) {
 
 	got := runEnv(t, harness.Command{Name: envBin, Env: map[string]string{"PATH": "/from-env"}, ReplaceEnv: true})
 
-	assert.Equal(t, envOutput("PATH=/from-env"), got)
+	assertEnv(t, []string{"PATH=/from-env"}, got)
 }
 
 // A streamed command's environment is replace mode's too: PATH and Env,
-// and nothing else of this process's. The keys are compared first, so a
-// failure prints names, never this process's values.
+// and nothing else of this process's.
 func TestExecRunnerStreamingReplaceEnv(t *testing.T) {
 	t.Setenv("TF_CLI_ARGS", "planted")
 	var stdout bytes.Buffer
@@ -638,19 +660,14 @@ func TestExecRunnerStreamingReplaceEnv(t *testing.T) {
 
 	_, err := execCommandRunner{}.Run(ctx, harness.Command{
 		Name:       envBin,
+		Args:       []string{envNulArg},
 		Env:        map[string]string{"AWS_REGION": "us-east-1"},
 		ReplaceEnv: true,
 		Stdout:     &stdout,
 	})
 
 	require.NoError(t, err)
-	var keys []string
-	for _, line := range strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n") {
-		key, _, _ := strings.Cut(line, "=")
-		keys = append(keys, key)
-	}
-	require.Equal(t, []string{"PATH", "AWS_REGION"}, keys)
-	assert.Equal(t, envOutput("PATH="+os.Getenv("PATH"), "AWS_REGION=us-east-1"), stdout.String())
+	assertEnv(t, []string{"PATH=" + os.Getenv("PATH"), "AWS_REGION=us-east-1"}, envEntries(stdout.String()))
 }
 
 // Without ReplaceEnv the child inherits as it always has: this process's
@@ -674,11 +691,11 @@ func TestExecRunnerInheritedEnvIsUnchanged(t *testing.T) {
 		want = append(want, entry)
 	}
 	want = append(want, "INFRAFACTORY_ADDED=env", "INFRAFACTORY_OVERRIDDEN=env")
-	require.Contains(t, want, "INFRAFACTORY_KEPT=kept")
+	require.True(t, slices.Contains(want, "INFRAFACTORY_KEPT=kept"), "want lost INFRAFACTORY_KEPT")
 
 	got := runEnv(t, harness.Command{Name: envBin, Env: env, StripEnv: []string{"AWS_*"}})
 
-	assert.Equal(t, envOutput(want...), got)
+	assertEnv(t, want, got)
 }
 
 // Replace mode has nothing to strip, so a command asking for both is a
@@ -712,8 +729,8 @@ func TestRunTofuPassesExactlyItsEnv(t *testing.T) {
 	t.Setenv("TF_CLI_ARGS", "-planted")
 	env := []string{"AWS_REGION=us-east-1", "PATH=" + bin, "TF_IN_AUTOMATION=1"}
 
-	stdout, stderr, err := runTofu(t.TempDir(), env)
+	stdout, stderr, err := runTofu(t.TempDir(), env, envNulArg)
 
 	require.NoError(t, err, stderr)
-	assert.Equal(t, envOutput(env...), stdout)
+	assertEnv(t, env, envEntries(stdout))
 }
