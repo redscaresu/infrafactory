@@ -3,8 +3,11 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestScenarioCommandsRequireScenarioArg(t *testing.T) {
@@ -94,5 +97,56 @@ func TestExitCodeForError(t *testing.T) {
 	usageErr := &CLIError{Op: "run", Code: errorCodeUsage, Err: errors.New("usage")}
 	if ExitCodeForError(usageErr) != ExitCodeUsage {
 		t.Fatalf("expected usage exit code %d", ExitCodeUsage)
+	}
+}
+
+func TestExitCodeForErrorTofuExitCode(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "carried 2", err: &TofuExitError{ExitCode: 2}, want: 2},
+		{name: "carried 2 wrapped", err: fmt.Errorf("rehearse plan: %w", &TofuExitError{ExitCode: 2}), want: 2},
+		{name: "carried 255", err: &TofuExitError{ExitCode: 255}, want: 255},
+		{name: "carried 0", err: &TofuExitError{ExitCode: 0}, want: ExitCodeRuntime},
+		{name: "carried -1", err: &TofuExitError{ExitCode: -1}, want: ExitCodeRuntime},
+		{name: "carried 256", err: &TofuExitError{ExitCode: 256}, want: ExitCodeRuntime},
+		{name: "carried 1000", err: &TofuExitError{ExitCode: 1000}, want: ExitCodeRuntime},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, ExitCodeForError(tc.err))
+		})
+	}
+}
+
+func TestReportError(t *testing.T) {
+	t.Parallel()
+
+	usageErr := &CLIError{Op: "run", Code: errorCodeUsage, Err: errors.New("expected exactly 1 scenario path argument")}
+	cases := []struct {
+		name       string
+		err        error
+		wantCode   int
+		wantStderr string
+	}{
+		{name: "nil", err: nil, wantCode: ExitCodeSuccess, wantStderr: ""},
+		{name: "quiet tofu exit", err: &TofuExitError{ExitCode: 2}, wantCode: 2, wantStderr: ""},
+		{name: "quiet tofu exit wrapped", err: fmt.Errorf("rehearse plan: %w", &TofuExitError{ExitCode: 3}), wantCode: 3, wantStderr: ""},
+		{name: "tofu exit -1 is written", err: &TofuExitError{ExitCode: -1}, wantCode: ExitCodeRuntime, wantStderr: "tofu exited with code -1\n"},
+		{name: "usage error is written", err: usageErr, wantCode: ExitCodeUsage, wantStderr: usageErr.Error() + "\n"},
+		{name: "other error is written", err: errors.New("boom"), wantCode: ExitCodeRuntime, wantStderr: "boom\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stderr bytes.Buffer
+			assert.Equal(t, tc.wantCode, ReportError(tc.err, &stderr))
+			assert.Equal(t, tc.wantStderr, stderr.String())
+		})
 	}
 }

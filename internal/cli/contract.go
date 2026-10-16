@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 )
@@ -69,9 +70,34 @@ func outputModeFromCommand(cmd *cobra.Command) (OutputMode, error) {
 	return mode, nil
 }
 
+// TofuExitError carries the exit code of a tofu run that finished, so
+// infrafactory exits with tofu's own code. Tofu has already written its own
+// stderr, so ReportError prints nothing for it.
+type TofuExitError struct {
+	ExitCode int
+}
+
+func (e *TofuExitError) Error() string {
+	return fmt.Sprintf("tofu exited with code %d", e.ExitCode)
+}
+
+// passesThrough reports whether ExitCode can reach os.Exit unchanged: 0 would
+// report success for an error, and a code outside 1-255 is truncated by the OS.
+func (e *TofuExitError) passesThrough() bool {
+	return e.ExitCode >= 1 && e.ExitCode <= 255
+}
+
 func ExitCodeForError(err error) int {
 	if err == nil {
 		return ExitCodeSuccess
+	}
+
+	var tofuErr *TofuExitError
+	if errors.As(err, &tofuErr) {
+		if tofuErr.passesThrough() {
+			return tofuErr.ExitCode
+		}
+		return ExitCodeRuntime
 	}
 
 	var cliErr *CLIError
@@ -80,4 +106,16 @@ func ExitCodeForError(err error) int {
 	}
 
 	return ExitCodeRuntime
+}
+
+// ReportError writes err to w and returns the exit code for it. A tofu exit
+// code that passes through is not written: tofu already explained it. Any
+// other carried code is written, so an exit 1 is never silent.
+func ReportError(err error, w io.Writer) int {
+	var tofuErr *TofuExitError
+	quiet := errors.As(err, &tofuErr) && tofuErr.passesThrough()
+	if err != nil && !quiet {
+		fmt.Fprintln(w, err)
+	}
+	return ExitCodeForError(err)
 }
