@@ -1,6 +1,6 @@
 ---
 kind: lead
-status: ready
+status: later
 epic: prod-read-seam
 depends_on: [prod-read-seam-reader-policy, prod-read-seam-reader-describe-volumes]
 touches: []
