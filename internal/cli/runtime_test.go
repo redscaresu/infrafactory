@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -10,12 +11,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/generator/scrubtest"
 	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/scenario"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type stubMockStateClient struct{}
@@ -380,6 +385,41 @@ func TestFormatCommandErrorPassThroughPaths(t *testing.T) {
 	}
 }
 
+//go:embed testdata/provider_schema.json
+var recordedProviderSchema []byte
+
+// recordedSchemaRunner stands in for tofu in schema extraction: init does
+// nothing and `providers schema -json` returns a schema recorded from the
+// real scaleway provider, so a test that only needs a schema never
+// downloads one. Any other command is an error.
+type recordedSchemaRunner struct{}
+
+func (recordedSchemaRunner) Run(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {
+	if cmd.Name == "tofu" {
+		switch strings.Join(cmd.Args, " ") {
+		case "init":
+			return harness.CommandResult{}, nil
+		case "providers schema -json":
+			return harness.CommandResult{Stdout: recordedProviderSchema}, nil
+		}
+	}
+	return harness.CommandResult{}, fmt.Errorf("recordedSchemaRunner: unexpected command %s %v", cmd.Name, cmd.Args)
+}
+
+// countingSchemaRunner is recordedSchemaRunner, counting the schemas it
+// returns, for a runtime whose generator a test cannot replace.
+type countingSchemaRunner struct {
+	schemas int
+}
+
+func (r *countingSchemaRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
+	result, err := recordedSchemaRunner{}.Run(ctx, cmd)
+	if err == nil && len(result.Stdout) > 0 {
+		r.schemas++
+	}
+	return result, err
+}
+
 // providersTFEchoRunner is a fake harness.CommandRunner whose Run reads
 // the providers.tf in cmd.Dir on the `tofu providers schema -json`
 // invocation and returns the file's bytes as the "schema". That lets
@@ -470,4 +510,33 @@ func TestEnsureProviderSchemaEmptyCloudFallsBackToScaleway(t *testing.T) {
 	if !strings.Contains(string(runtime.ProviderSchemaJSON), "scaleway/scaleway") {
 		t.Fatalf("expected empty cloud to fall back to scaleway, got %q", runtime.ProviderSchemaJSON)
 	}
+}
+
+// The command helpers inject recordedSchemaRunner, so this is the one test
+// that extracts a schema through the runner buildRuntime picks when the
+// options name none: real tofu. It downloads the provider, so it runs only
+// under INFRAFACTORY_ENABLE_E2E, which CI's "AWS against fakeaws" step sets.
+func TestBuildRuntimeExtractsSchemaWithRealTofu(t *testing.T) {
+	if os.Getenv("INFRAFACTORY_ENABLE_E2E") != "1" {
+		t.Skip("set INFRAFACTORY_ENABLE_E2E=1 to enable e2e tests")
+	}
+	scrubtest.Register(t) // buildRuntime registers; undo it when the test ends
+	opts := defaultRuntimeOptions()
+	opts.configLoader = func(string) (config.Config, error) {
+		cfg := config.Default()
+		cfg.Agent.Type = generator.AgentTypeClaudeCode
+		return cfg, nil
+	}
+	cmd := &cobra.Command{Use: "test"}
+	cmd.Flags().String("config", "unused.yaml", "")
+	runtime, err := buildRuntime(cmd, opts)
+	require.NoError(t, err)
+
+	// EnsureProviderSchema only logs a failure; extracting directly through
+	// the same runner surfaces it.
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	schema, err := harness.ExtractProviderSchemaForCloud(ctx, runtime.schemaRunner, nil, "scaleway")
+	require.NoError(t, err)
+	assert.Contains(t, string(schema), `"registry.opentofu.org/scaleway/scaleway"`)
 }

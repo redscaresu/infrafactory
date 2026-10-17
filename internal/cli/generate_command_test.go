@@ -12,6 +12,8 @@ import (
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGenerateCommandWritesFilesDeterministically(t *testing.T) {
@@ -549,7 +551,38 @@ func TestValidateLayer3ProjectResourceSkippedWhenDisabled(t *testing.T) {
 	}
 }
 
+// The command helpers extract schemas with recordedSchemaRunner, so a test
+// that generates never runs tofu init. This fails if the recorded schema
+// stops reaching the generator.
+func TestGenerateCommandForTestSendsTheRecordedSchema(t *testing.T) {
+	t.Parallel()
+
+	h := newCommandTestHarness(t)
+	var got []byte
+	opts := runtimeOptions{
+		configLoader:   config.Load,
+		scenarioLoader: defaultScenarioLoader,
+		deps: RuntimeDependencies{
+			Generator: generator.SeedGeneratorFunc(func(_ context.Context, req generator.Request) (*generator.GeneratedCode, error) {
+				got = req.ProviderSchemaJSON
+				return nil, errors.New("stop after the request")
+			}),
+		},
+	}
+
+	cmd := newGenerateCommandForTest(opts)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
+
+	require.Error(t, cmd.Execute())
+	assert.Equal(t, recordedProviderSchema, got)
+}
+
 func newGenerateCommandForTest(opts runtimeOptions) *cobra.Command {
+	if opts.schemaRunner == nil {
+		opts.schemaRunner = recordedSchemaRunner{}
+	}
 	cmd := &cobra.Command{
 		Use:  "generate <scenario>",
 		Args: requireScenarioArg,

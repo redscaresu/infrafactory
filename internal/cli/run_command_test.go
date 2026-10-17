@@ -1289,6 +1289,9 @@ func newRunCommandForTest(opts runtimeOptions) *cobra.Command {
 	if opts.deps.MockState == nil {
 		opts.deps.MockState = &fakeRunMockStateClient{statePayload: []byte(`{"instance":{"servers":[]}}`)}
 	}
+	if opts.schemaRunner == nil {
+		opts.schemaRunner = recordedSchemaRunner{}
+	}
 	cmd := &cobra.Command{
 		Use:  "run <scenario>",
 		Args: requireScenarioArg,
