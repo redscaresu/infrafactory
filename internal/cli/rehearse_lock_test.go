@@ -66,7 +66,7 @@ func TestRehearsePrepareRefusesTheLockByName(t *testing.T) {
 			t.Parallel()
 			repo := lockRepo(t, tc.lock, "")
 
-			run := runPrepare(repo, append([]string{"envs/prod"}, prepareFlags...)...)
+			run := runPrepare(t, repo, append([]string{"envs/prod"}, prepareFlags...)...)
 
 			require.ErrorIs(t, run.err, errRehearsalRefuses)
 			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
@@ -84,7 +84,7 @@ func TestRehearsePrepareRefusesAnUnknownArgumentNamingTheLockVersion(t *testing.
 	repo := lockRepo(t, lockEntry("registry.opentofu.org/hashicorp/aws", "5.99.0"),
 		"provider \"aws\" {\n  alias       = \"other\"\n  region      = \"eu-west-1\"\n  made_up_arg = 1\n}\n")
 
-	run := runPrepare(repo, append([]string{"envs/prod"}, prepareFlags...)...)
+	run := runPrepare(t, repo, append([]string{"envs/prod"}, prepareFlags...)...)
 
 	require.ErrorIs(t, run.err, errRehearsalRefuses)
 	assert.Contains(t, run.err.Error(), "provider.aws.made_up_arg: refused: the gate's table of hashicorp/aws "+harness.AWSProviderVersion+
@@ -107,14 +107,14 @@ func TestRehearsePrepareReportsTheLock(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			human := runPrepare(lockRepo(t, tc.lock, ""), append([]string{"envs/prod"}, prepareFlags...)...)
+			human := runPrepare(t, lockRepo(t, tc.lock, ""), append([]string{"envs/prod"}, prepareFlags...)...)
 			require.NoError(t, human.err)
 			assert.Contains(t, human.stdout, "AWS provider: hashicorp/aws "+tc.version+"\n")
 			for _, warning := range tc.warnings {
 				assert.Contains(t, human.stdout, "Warning: "+warning+"\n")
 			}
 
-			jsonRun := runPrepare(lockRepo(t, tc.lock, ""), append([]string{"envs/prod", "--output", "json"}, prepareFlags...)...)
+			jsonRun := runPrepare(t, lockRepo(t, tc.lock, ""), append([]string{"envs/prod", "--output", "json"}, prepareFlags...)...)
 			require.NoError(t, jsonRun.err)
 			var result rehearsePrepareResult
 			require.NoError(t, json.Unmarshal([]byte(jsonRun.stdout), &result))

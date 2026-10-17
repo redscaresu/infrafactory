@@ -125,12 +125,9 @@ func endRepo(t *testing.T) (string, string) {
 }
 
 // endRoot is the root command with end built from e.
-func endRoot(e rehearseEnd) *cobra.Command {
-	root := NewRootCmd()
-	group, _, _ := root.Find([]string{"rehearse"})
-	end, _, _ := group.Find([]string{"end"})
-	group.RemoveCommand(end)
-	group.AddCommand(newRehearseEndCmd(e))
+func endRoot(t *testing.T, e rehearseEnd) *cobra.Command {
+	t.Helper()
+	root := rehearseRootWith(t, "end", newRehearseEndCmd(e))
 	root.SetErr(&bytes.Buffer{})
 	return root
 }
@@ -145,7 +142,7 @@ type endRun struct {
 // report.
 func runEnd(t *testing.T, e rehearseEnd, id string) endRun {
 	t.Helper()
-	root := endRoot(e)
+	root := endRoot(t, e)
 	stdout := &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetArgs([]string{"rehearse", "end", id, "--output", "json"})

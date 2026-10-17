@@ -122,13 +122,9 @@ func readFlags(drop ...string) []string {
 }
 
 // readRoot is the root command with read built from r.
-func readRoot(r rehearseRead) *cobra.Command {
-	root := NewRootCmd()
-	group, _, _ := root.Find([]string{"rehearse"})
-	read, _, _ := group.Find([]string{"read"})
-	group.RemoveCommand(read)
-	group.AddCommand(newRehearseReadCmd(r))
-	return root
+func readRoot(t *testing.T, r rehearseRead) *cobra.Command {
+	t.Helper()
+	return rehearseRootWith(t, "read", newRehearseReadCmd(r))
 }
 
 type readRun struct {
@@ -140,7 +136,7 @@ type readRun struct {
 // output to never carrying the key.
 func runRead(t *testing.T, wd string, doer *readDoer, args ...string) readRun {
 	t.Helper()
-	root := readRoot(rehearseRead{doer: doer, wd: wd})
+	root := readRoot(t, rehearseRead{doer: doer, wd: wd})
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetErr(stderr)

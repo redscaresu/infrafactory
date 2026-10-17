@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/spf13/cobra"
@@ -100,7 +101,9 @@ func StartRehearsalFakeaws(bin, dir, account, region string) (pid, port int, err
 
 // RehearseReadRoot is the root command with `rehearse read` sending every
 // request through doer, for the teardown e2e's read of a stand-in prod.
-func RehearseReadRoot(doer aws.HTTPClient) *cobra.Command { return readRoot(rehearseRead{doer: doer}) }
+func RehearseReadRoot(t *testing.T, doer aws.HTTPClient) *cobra.Command {
+	return readRoot(t, rehearseRead{doer: doer})
+}
 
 // EC2ErrorAnswer is EC2's error answer carrying code, for the teardown
 // e2e's stand-in prod.
