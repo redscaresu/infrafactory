@@ -140,6 +140,11 @@ jobs:
       - name: Test the board-only check
         run: bash scripts/ci_board_only_test.sh
 
+      - name: Test the scenario-gate scripts
+        run: |
+          bash scripts/scenario_change_gate_test.sh
+          bash scripts/scenario_gate_upload_check_test.sh
+
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
