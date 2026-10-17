@@ -260,7 +260,7 @@ jobs:
         run: bash scripts/ui_e2e.sh --grep-invert "Visual regression"
 
       - name: Upload Playwright report on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report

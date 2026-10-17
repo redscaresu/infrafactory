@@ -11,6 +11,7 @@ on:
 jobs:
   check-doc-hygiene:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - name: Checkout
         uses: actions/checkout@v7
