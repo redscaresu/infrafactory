@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -406,6 +407,56 @@ func (recordedSchemaRunner) Run(_ context.Context, cmd harness.Command) (harness
 	return harness.CommandResult{}, fmt.Errorf("recordedSchemaRunner: unexpected command %s %v", cmd.Name, cmd.Args)
 }
 
+// schemaGuardEnv names the guard's directory to the processes it covers.
+const schemaGuardEnv = "INFRAFACTORY_TEST_SCHEMA_GUARD"
+
+// realPATH is PATH before guardSchemaExtraction put its tofu first.
+var realPATH = os.Getenv("PATH")
+
+// guardSchemaExtraction puts a tofu first on PATH that refuses provider
+// schema extraction (tofu run in an infrafactory-schema-* dir) and hands
+// every other command to the real tofu. A runtime that missed
+// recordedSchemaRunner would otherwise download a provider, or pass offline
+// because EnsureProviderSchema only logs the failure, so each refusal is
+// recorded and the returned check fails the run. With no tofu installed
+// there is nothing to guard: extraction fails without a download. A test
+// binary the tests start as a helper inherits the parent's guard through
+// schemaGuardEnv, so its refusals land in the parent's check.
+func guardSchemaExtraction() (check func() error, err error) {
+	noCheck := func() error { return nil }
+	if os.Getenv(schemaGuardEnv) != "" {
+		return noCheck, nil
+	}
+	tofu, err := exec.LookPath("tofu")
+	if err != nil {
+		return noCheck, nil
+	}
+	dir, err := os.MkdirTemp("", "infrafactory-tofu-guard-*")
+	if err != nil {
+		return nil, fmt.Errorf("schema guard: %w", err)
+	}
+	if err := os.Setenv(schemaGuardEnv, dir); err != nil {
+		return nil, fmt.Errorf("schema guard: %w", err)
+	}
+	refused := filepath.Join(dir, "refused")
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$(pwd)\" in */infrafactory-schema-*)\n"+
+		"\tpwd >> %q\n\techo 'schema guard: inject recordedSchemaRunner' >&2\n\texit 1;;\nesac\nexec %q \"$@\"\n", refused, tofu)
+	if err := os.WriteFile(filepath.Join(dir, "tofu"), []byte(script), 0o700); err != nil {
+		return nil, fmt.Errorf("schema guard: %w", err)
+	}
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+realPATH); err != nil {
+		return nil, fmt.Errorf("schema guard: %w", err)
+	}
+	return func() error {
+		defer os.RemoveAll(dir)
+		dirs, _ := os.ReadFile(refused)
+		if len(dirs) > 0 {
+			return fmt.Errorf("schema guard: a test ran real provider schema extraction; inject recordedSchemaRunner (runtimeOptions.schemaRunner). Refused in:\n%s", dirs)
+		}
+		return nil
+	}, nil
+}
+
 // countingSchemaRunner is recordedSchemaRunner, counting the schemas it
 // returns, for a runtime whose generator a test cannot replace.
 type countingSchemaRunner struct {
@@ -520,7 +571,8 @@ func TestBuildRuntimeExtractsSchemaWithRealTofu(t *testing.T) {
 	if os.Getenv("INFRAFACTORY_ENABLE_E2E") != "1" {
 		t.Skip("set INFRAFACTORY_ENABLE_E2E=1 to enable e2e tests")
 	}
-	scrubtest.Register(t) // buildRuntime registers; undo it when the test ends
+	t.Setenv("PATH", realPATH) // past the schema guard
+	scrubtest.Register(t)      // buildRuntime registers; undo it when the test ends
 	opts := defaultRuntimeOptions()
 	opts.configLoader = func(string) (config.Config, error) {
 		cfg := config.Default()

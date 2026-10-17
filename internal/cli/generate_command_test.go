@@ -575,7 +575,7 @@ func TestGenerateCommandForTestSendsTheRecordedSchema(t *testing.T) {
 	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs([]string{h.ScenarioPath, "--config", h.ConfigPath})
 
-	require.Error(t, cmd.Execute())
+	require.ErrorContains(t, cmd.Execute(), "stop after the request")
 	assert.Equal(t, recordedProviderSchema, got)
 }
 

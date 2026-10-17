@@ -302,6 +302,8 @@ func TestUIRefusesToStartWhenRequestedDeployCannotBeBuilt(t *testing.T) {
 
 // A run the UI starts builds its runtime with the starter's schemaRunner.
 func TestUIRunStarterExtractsWithItsSchemaRunner(t *testing.T) {
+	prompts, err := filepath.Abs(filepath.Join("..", "..", "prompts"))
+	require.NoError(t, err)
 	chdirBesideSchema(t)
 	h := newCommandTestHarness(t)
 	t.Setenv("INFRAFACTORY_RUNSTORE_ROOT", h.RunstoreRoot())
@@ -310,10 +312,10 @@ func TestUIRunStarterExtractsWithItsSchemaRunner(t *testing.T) {
 	require.NoError(t, err)
 	// Run-mode detection reads mockway's state before the run generates.
 	mockway := newRecordingMockServer(t, "scaleway")
-	raw = []byte(strings.Replace(string(raw), closedMockURL, mockway.server.URL, 1) + "paths:\n  output: " + h.OutputDir() + "\n")
+	raw = []byte(strings.Replace(string(raw), closedMockURL, mockway.server.URL, 1) + "paths:\n  prompts: " + prompts + "\n  output: " + h.OutputDir() + "\n")
 	require.NoError(t, os.WriteFile(h.ConfigPath, raw, 0o600))
 	llm := filepath.Join(t.TempDir(), "claude")
-	writeScript(t, llm, "#!/bin/sh\nexit 1\n")
+	writeScript(t, llm, "#!/bin/sh\ntouch \"$0.called\"\nexit 1\n")
 
 	serverCfg := config.Default()
 	serverCfg.Agent.Type = generator.AgentTypeClaudeCode
@@ -323,5 +325,8 @@ func TestUIRunStarterExtractsWithItsSchemaRunner(t *testing.T) {
 	runErr := starter.executeRun(context.Background(),
 		api.StartRunRequest{ScenarioName: "example-scenario", ScenarioPath: "training/example"}, "20261017T000000Z")
 
-	assert.Equal(t, 1, runner.schemas, "run: %v", runErr)
+	// The stub claude refused every iteration's generate.
+	require.ErrorContains(t, runErr, `terminal reason "repair_budget_exhausted"`)
+	assert.FileExists(t, llm+".called")
+	assert.Equal(t, 1, runner.schemas)
 }

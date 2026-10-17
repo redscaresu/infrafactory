@@ -238,20 +238,35 @@ func TestRootCommandExtractsWithSchemaRunner(t *testing.T) {
 		root.SetErr(&bytes.Buffer{})
 		root.SetArgs([]string{"generate", h.ScenarioPath, "--config", h.ConfigPath})
 
-		require.Error(t, root.Execute())
+		require.ErrorContains(t, root.Execute(), "stop after the request")
 		assert.Equal(t, recordedProviderSchema, got)
 	})
 
 	t.Run("default dependencies use the runner", func(t *testing.T) {
 		t.Parallel()
 		h := newCommandTestHarness(t)
+		// The default generator is the real Claude adapter: give it the
+		// repo's prompts and a claude that refuses, so the run ends at a
+		// known refusal and never at a real LLM.
+		claude := filepath.Join(t.TempDir(), "claude")
+		writeScript(t, claude, "#!/bin/sh\necho stub claude refused >&2\nexit 1\n")
+		prompts, err := filepath.Abs(filepath.Join("..", "..", "prompts"))
+		require.NoError(t, err)
+		raw, err := os.ReadFile(h.ConfigPath)
+		require.NoError(t, err)
+		raw = []byte(strings.Replace(string(raw), "  type: claude-code\n",
+			"  type: claude-code\n  claude:\n    command: "+claude+"\n", 1) +
+			"paths:\n  prompts: " + prompts + "\n  output: " + h.OutputDir() + "\n")
+		require.NoError(t, os.WriteFile(h.ConfigPath, raw, 0o600))
 		runner := &countingSchemaRunner{}
 		root := NewRootCmd(withSchemaRunner(runner))
 		root.SetOut(&bytes.Buffer{})
 		root.SetErr(&bytes.Buffer{})
 		root.SetArgs([]string{"generate", h.ScenarioPath, "--config", h.ConfigPath})
 
-		require.Error(t, root.Execute())
+		err = root.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "stub claude refused")
 		assert.Equal(t, 1, runner.schemas)
 	})
 }
