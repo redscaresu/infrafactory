@@ -17,8 +17,9 @@ name: Release
 # release's draft flag and re-uploads onto it, so a failure partway can leave
 # it missing binaries.
 #
-# workflow_dispatch is the dry run. It only accepts a v0.0.0-dryrun-* tag, so
-# it cannot replace a real release, and its release is never published.
+# A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
+# accepts only that form. So the dry run cannot replace a real release, and
+# its release is never published.
 on:
   push:
     tags:
@@ -50,8 +51,10 @@ jobs:
             echo "VERSION '${VERSION}' is not vX.Y.Z or vX.Y.Z-suffix" >&2
             exit 1
           fi
-          if [[ "${DRY_RUN}" == true && ! "${VERSION}" =~ ^v0\.0\.0-dryrun- ]]; then
-            echo "a dispatch may only release a v0.0.0-dryrun-* tag, not '${VERSION}'" >&2
+          is_dryrun=false
+          [[ "${VERSION}" == v0.0.0-dryrun-* ]] && is_dryrun=true
+          if [[ "${is_dryrun}" != "${DRY_RUN}" ]]; then
+            echo "only workflow_dispatch may release a v0.0.0-dryrun-* tag, and dispatch only those: '${VERSION}'" >&2
             exit 1
           fi
 
@@ -129,14 +132,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Check every binary and checksum downloaded
+      # dist/ must hold exactly the binary and .sha256 of each target, by name,
+      # so a missing, renamed or extra file fails before anything is created.
+      - name: Check dist/ holds exactly the expected files
         run: |
-          expected=$(( $(jq length <<< "${TARGETS}") * 2 ))
-          actual=$(find dist -type f | wc -l)
-          if [[ "${actual}" -ne "${expected}" ]]; then
-            echo "expected ${expected} files in dist/, found ${actual}" >&2
-            exit 1
-          fi
+          expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
+          diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
       # Created as a draft, so no release is visible until every file is attached.
       - name: Create the draft release with every file
