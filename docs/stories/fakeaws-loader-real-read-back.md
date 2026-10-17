@@ -6,6 +6,7 @@ epic: fakeaws-loader
 depends_on: [fakeaws-load-read-back, prod-read-seam-reader-describe-volumes, prod-read-seam-real-recording]
 touches: []
 risk: high
+costs: money
 ---
 
 # Lead: load the raw step-0 recording into a private in-process fakeaws and read it back, inside the recording's window (no cloud)
