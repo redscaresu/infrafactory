@@ -143,8 +143,12 @@ else
   if [ -n "$PKGS" ]; then
     echo "Running go test for touched packages:"
     echo "$PKGS" | sed 's/^/  /'
+    # internal/cli took 27 and 37 minutes in local runs on 2026-10-17: most
+    # of its tests run the real `tofu init` for provider-schema extraction,
+    # each waiting out a 60s deadline. go's 10m default would fail the hook.
+    # ponytail: 60m ceiling, a hermetic schema runner in tests cuts the time.
     # shellcheck disable=SC2086
-    go test -tags noui $PKGS
+    go test -tags noui -timeout 60m $PKGS
   fi
   if [ -n "$UI_CHANGED" ]; then
     echo "Running UI unit tests..."
