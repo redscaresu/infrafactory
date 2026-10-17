@@ -330,9 +330,9 @@ jobs:
       # `pitfalls check-avoid` retires on fakeaws, and every retired
       # avoid record in pitfalls/avoid-checks/ must still replay clean.
       # The Layer 2 seed of the resolved AMI runs from internal/cli,
-      # whose tests alone can set that AMI. The one internal/cli test that
-      # extracts a provider schema with real tofu runs here too; the rest
-      # use a recorded schema.
+      # whose tests alone can set that AMI. The internal/cli tests that
+      # extract a provider schema with real tofu (they call
+      # PassSchemaGuard) run here too; the rest use a recorded schema.
       # fakeaws is pinned to one commit, so bumping FAKEAWS_SHA is a
       # deliberate edit. -count=1: the test cache cannot see the sibling
       # checkout, so a cached PASS could replay after a bump. `go test`

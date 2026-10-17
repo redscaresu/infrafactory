@@ -391,8 +391,9 @@ var recordedProviderSchema []byte
 
 // recordedSchemaRunner stands in for tofu in schema extraction: init does
 // nothing and `providers schema -json` returns a schema recorded from the
-// real scaleway provider, so a test that only needs a schema never
-// downloads one. Any other command is an error.
+// real scaleway provider and cut down to scaleway_instance_ip, so a test
+// that only needs a schema never downloads one. Any other command is an
+// error.
 type recordedSchemaRunner struct{}
 
 func (recordedSchemaRunner) Run(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {
@@ -421,7 +422,7 @@ func passSchemaGuard(t *testing.T) {
 }
 
 // guardSchemaExtraction puts a tofu first on PATH that refuses provider
-// schema extraction (tofu run in an infrafactory-schema-* dir) and hands
+// schema extraction (tofu run in a harness.ProviderSchemaDirPrefix dir) and hands
 // every other command to the real tofu. A runtime that missed
 // recordedSchemaRunner would otherwise download a provider, or pass offline
 // because EnsureProviderSchema only logs the failure, so each refusal is
@@ -446,8 +447,9 @@ func guardSchemaExtraction() (check func() error, err error) {
 		return nil, fmt.Errorf("schema guard: %w", err)
 	}
 	refused := filepath.Join(dir, "refused")
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$(pwd)\" in */infrafactory-schema-*)\n"+
-		"\tpwd >> %q\n\techo 'schema guard: inject recordedSchemaRunner' >&2\n\texit 1;;\nesac\nexec %q \"$@\"\n", refused, tofu)
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$(pwd)\" in */%s*)\n"+
+		"\tpwd >> %q\n\techo 'schema guard: inject recordedSchemaRunner' >&2\n\texit 1;;\nesac\nexec %q \"$@\"\n",
+		harness.ProviderSchemaDirPrefix, refused, tofu)
 	if err := os.WriteFile(filepath.Join(dir, "tofu"), []byte(script), 0o700); err != nil {
 		return nil, fmt.Errorf("schema guard: %w", err)
 	}
@@ -570,9 +572,10 @@ func TestEnsureProviderSchemaEmptyCloudFallsBackToScaleway(t *testing.T) {
 	}
 }
 
-// The command helpers inject recordedSchemaRunner, so this is the one test
-// that extracts a schema through the runner buildRuntime picks when the
-// options name none: real tofu. It downloads the provider, so it runs only
+// The command helpers inject recordedSchemaRunner, so this is the test that
+// extracts a schema through the runner buildRuntime picks when the options
+// name none: real tofu. (TestRehearsalAWSProviderTableMatchesSchema extracts
+// one too, through harness directly.) It downloads the provider, so it runs only
 // under INFRAFACTORY_ENABLE_E2E, which CI's "AWS against fakeaws" step sets.
 func TestBuildRuntimeExtractsSchemaWithRealTofu(t *testing.T) {
 	if os.Getenv("INFRAFACTORY_ENABLE_E2E") != "1" {
