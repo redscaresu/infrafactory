@@ -394,7 +394,7 @@ func goldenPrepareRoot(h *CommandTestHarness, mainTF string) *cobra.Command {
 		}
 		return harness.CommandResult{}, nil
 	})
-	return prepareRoot(stubWalls(rehearsePrepare{runner: tofu, wd: h.WorkspaceDir, newID: func() string { return prepareID }}))
+	return prepareRoot(h.T, stubWalls(rehearsePrepare{runner: tofu, wd: h.WorkspaceDir, newID: func() string { return prepareID }}))
 }
 
 // goldenReadRoot makes the workspace a repo holding the read's key file
@@ -403,7 +403,7 @@ func goldenPrepareRoot(h *CommandTestHarness, mainTF string) *cobra.Command {
 func goldenReadRoot(h *CommandTestHarness, account string) *cobra.Command {
 	mustWriteFile(h.T, filepath.Join(h.WorkspaceDir, ".git", "HEAD"), "ref: refs/heads/main\n")
 	writeReadInputs(h.T, h.WorkspaceDir, readVPCEntry)
-	root := readRoot(rehearseRead{doer: &readDoer{account: account}, wd: h.WorkspaceDir})
+	root := readRoot(h.T, rehearseRead{doer: &readDoer{account: account}, wd: h.WorkspaceDir})
 	root.SetErr(&bytes.Buffer{})
 	return root
 }
@@ -420,7 +420,7 @@ func goldenEndRoot(h *CommandTestHarness, planted bool) *cobra.Command {
 		}
 		require.NoError(h.T, endStub(h.T, "fakeaws").write(dir), "write record")
 	}
-	return endRoot(rehearseEnd{wd: h.WorkspaceDir})
+	return endRoot(h.T, rehearseEnd{wd: h.WorkspaceDir})
 }
 
 // goldenPassthroughRoot prepares a rehearsal with a live fakeaws stub

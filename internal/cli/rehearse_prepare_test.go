@@ -36,12 +36,9 @@ func lockEntry(addr, version string) string {
 }
 
 // prepareRoot is the root command with prepare built from p.
-func prepareRoot(p rehearsePrepare) *cobra.Command {
-	root := NewRootCmd()
-	group, _, _ := root.Find([]string{"rehearse"})
-	prepare, _, _ := group.Find([]string{"prepare"})
-	group.RemoveCommand(prepare)
-	group.AddCommand(newRehearsePrepareCmd(p))
+func prepareRoot(t *testing.T, p rehearsePrepare) *cobra.Command {
+	t.Helper()
+	root := rehearseRootWith(t, "prepare", newRehearsePrepareCmd(p))
 	root.SetErr(&bytes.Buffer{})
 	return root
 }
@@ -86,7 +83,8 @@ func stubWalls(p rehearsePrepare) rehearsePrepare {
 // stubWalls and the id prepareID. The first init's init writes a manifest
 // naming only the root: gate 2 still walks every module block from the
 // root.
-func runPrepare(wd string, args ...string) prepareRun {
+func runPrepare(t *testing.T, wd string, args ...string) prepareRun {
+	t.Helper()
 	var run prepareRun
 	runner := harness.CommandRunnerFunc(func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
 		run.calls = append(run.calls, c)
@@ -98,7 +96,7 @@ func runPrepare(wd string, args ...string) prepareRun {
 		}
 		return harness.CommandResult{}, nil
 	})
-	root := prepareRoot(stubWalls(rehearsePrepare{runner: runner, wd: wd, newID: func() string { return prepareID }}))
+	root := prepareRoot(t, stubWalls(rehearsePrepare{runner: runner, wd: wd, newID: func() string { return prepareID }}))
 	stdout := &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetArgs(append([]string{"rehearse", "prepare"}, args...))
@@ -153,7 +151,7 @@ func TestRehearsePrepareUsageErrorsExitTwo(t *testing.T) {
 			t.Parallel()
 			_, repo := prepareRepo(t, map[string]string{"envs/prod/main.tf": "resource \"terraform_data\" \"x\" {}\n"})
 
-			run := runPrepare(repo, tc.args...)
+			run := runPrepare(t, repo, tc.args...)
 
 			var cliErr *CLIError
 			require.ErrorAs(t, run.err, &cliErr)
@@ -193,7 +191,7 @@ func TestRehearsePrepareCopiesTheRootAndItsModules(t *testing.T) {
 	mustWriteFile(t, varFile, "size = 1\n")
 	before := treeDigest(t, repo)
 
-	run := runPrepare(repo, append([]string{"envs/prod", "--var-file", varFile, "--output", "json"}, prepareFlags...)...)
+	run := runPrepare(t, repo, append([]string{"envs/prod", "--var-file", varFile, "--output", "json"}, prepareFlags...)...)
 	require.NoError(t, run.err)
 
 	assert.Equal(t, before, treeDigest(t, repo), "prepare changed the source tree")
@@ -319,7 +317,7 @@ func TestRehearsePrepareRefusesNamingThePath(t *testing.T) {
 			tmp, repo := prepareRepo(t, map[string]string{"envs/prod/main.tf": prod})
 			args, want := tc.setup(t, tmp, repo)
 
-			run := runPrepare(repo, append(args, prepareFlags...)...)
+			run := runPrepare(t, repo, append(args, prepareFlags...)...)
 
 			require.Error(t, run.err)
 			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
@@ -338,7 +336,7 @@ func TestRehearsePrepareRefusesAnExistingID(t *testing.T) {
 		".infrafactory/rehearsals/" + prepareID + "/kept": "kept\n",
 	})
 
-	run := runPrepare(repo, append([]string{"envs/prod"}, prepareFlags...)...)
+	run := runPrepare(t, repo, append([]string{"envs/prod"}, prepareFlags...)...)
 
 	require.Error(t, run.err)
 	assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))
@@ -371,7 +369,7 @@ func TestRehearsePrepareGateRefusesBeforeAnyTofu(t *testing.T) {
 			tc.files["envs/prod/.terraform.lock.hcl"] = prepareLock
 			_, repo := prepareRepo(t, tc.files)
 
-			run := runPrepare(repo, append([]string{"envs/prod"}, prepareFlags...)...)
+			run := runPrepare(t, repo, append([]string{"envs/prod"}, prepareFlags...)...)
 
 			require.ErrorIs(t, run.err, errRehearsalRefuses)
 			assert.Equal(t, ExitCodeRuntime, ExitCodeForError(run.err))

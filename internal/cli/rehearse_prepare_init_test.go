@@ -54,7 +54,7 @@ func runPrepareWith(t *testing.T, p rehearsePrepare, repo string, tofu func(cont
 		return result, err
 	})
 	p.wd, p.newID = repo, func() string { return prepareID }
-	root := prepareRoot(p)
+	root := prepareRoot(t, p)
 	stdout := &bytes.Buffer{}
 	root.SetOut(stdout)
 	root.SetArgs(append(append([]string{"rehearse", "prepare", "envs/prod"}, prepareFlags...), args...))

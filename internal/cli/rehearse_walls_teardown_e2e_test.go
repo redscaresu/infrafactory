@@ -72,7 +72,7 @@ func TestRehearsalTeardown(t *testing.T) {
 		Read      string `json:"read"`
 		Exchanges int    `json:"exchanges"`
 	}
-	out = rehearse(t, cli.RehearseReadRoot(startStandInProd(t, bin)), teardownReadArgs(t, filepath.Join(rehearsal, "reads"))...)
+	out = rehearse(t, cli.RehearseReadRoot(t, startStandInProd(t, bin)), teardownReadArgs(t, filepath.Join(rehearsal, "reads"))...)
 	require.NoError(t, json.Unmarshal(out, &readResult), string(out))
 	assert.Equal(t, filepath.Join(rehearsal, read), readResult.Read)
 	assert.Equal(t, 1, readResult.Exchanges)

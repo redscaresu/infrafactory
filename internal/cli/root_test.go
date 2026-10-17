@@ -396,3 +396,20 @@ mockway:
 
 	return path
 }
+
+// rehearseRootWith is the root command with its `rehearse name` subcommand
+// replaced by sub. It fails the test if `rehearse name` is not registered,
+// since cobra's Find falls back to the nearest parent without an error.
+func rehearseRootWith(t *testing.T, name string, sub *cobra.Command) *cobra.Command {
+	t.Helper()
+	root := NewRootCmd()
+	group, _, err := root.Find([]string{"rehearse"})
+	require.NoError(t, err)
+	require.Equal(t, "rehearse", group.Name())
+	old, _, err := group.Find([]string{name})
+	require.NoError(t, err)
+	require.Equal(t, name, old.Name(), "rehearse %s is not registered", name)
+	group.RemoveCommand(old)
+	group.AddCommand(sub)
+	return root
+}
