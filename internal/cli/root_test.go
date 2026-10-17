@@ -254,6 +254,9 @@ func TestRootCommandExtractsWithSchemaRunner(t *testing.T) {
 		require.NoError(t, err)
 		raw, err := os.ReadFile(h.ConfigPath)
 		require.NoError(t, err)
+		// Without the match the replace below changes nothing and the real
+		// claude on PATH would run.
+		require.Contains(t, string(raw), "  type: claude-code\n")
 		raw = []byte(strings.Replace(string(raw), "  type: claude-code\n",
 			"  type: claude-code\n  claude:\n    command: "+claude+"\n", 1) +
 			"paths:\n  prompts: " + prompts + "\n  output: " + h.OutputDir() + "\n")
