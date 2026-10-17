@@ -18,6 +18,7 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         include:
