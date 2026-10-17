@@ -11,9 +11,11 @@ name: Release
 #
 # The matrix only builds and uploads artifacts. The release job runs only
 # after every leg succeeds, and it creates the release as a draft. It
-# publishes the draft last, once every file is attached. A failed leg, or a
-# failed upload, leaves a draft or no release at all, never a published
-# release with binaries missing.
+# publishes the draft last, once every file is attached. On a first run, a
+# failed leg or a failed upload leaves a draft or no release at all. A re-run
+# against an already-published tag is not covered: softprops keeps that
+# release's draft flag and re-uploads onto it, so a failure partway can leave
+# it missing binaries.
 #
 # workflow_dispatch is the dry run. It only accepts a v0.0.0-dryrun-* tag, so
 # it cannot replace a real release, and its release is never published.
