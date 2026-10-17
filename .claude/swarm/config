@@ -2,8 +2,8 @@
 lessons_file = AGENTS.md
 # The lead is a Claude session: dash puts what it can do in its own queue, apart from the user's.
 lead = session
-# goal-for-builders: each builder works to its Done when, bounded at 5 more turns (the spike's default). On for one epic as a trial; the user decides whether it stays.
-goal = 5
+# goal is off: the 2026-10-16/17 trial (22 builds) had no nudges and no uncaused stops, but the judge's
+# cost could not be measured (its Stop-hook tokens are not in the transcript), so the keep rule failed.
 # The user approved merge = agent on 2026-10-16 on one condition: a PR that can cost money waits for them.
 # swarm.sh merge holds every story marked costs: money (swarm-dev 0.21.0, merge-holds-costs-money).
 merge = agent
