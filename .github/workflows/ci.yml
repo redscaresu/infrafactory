@@ -259,7 +259,7 @@ jobs:
         # error: the specs answer run-mode themselves (ui/e2e/fixtures.ts).
         run: bash scripts/ui_e2e.sh --grep-invert "Visual regression"
 
-      - name: Upload Playwright report on failure
+      - name: Upload Playwright report on failure or cancel
         if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
