@@ -9,12 +9,14 @@ name: Release
 # ci.yml and doc-hygiene.yml stay on tags: they are read-only and hold no
 # secrets, so pinning there would be churn without a threat to answer.
 #
-# The matrix only builds and uploads artifacts. One release job runs after
-# every leg and attaches all binaries and checksums in a single call, so a
-# failed leg leaves no published release with binaries missing.
+# The matrix only builds and uploads artifacts. The release job runs only
+# after every leg succeeds, and it creates the release as a draft. It
+# publishes the draft last, once every file is attached. A failed leg, or a
+# failed upload, leaves a draft or no release at all, never a published
+# release with binaries missing.
 #
-# workflow_dispatch is the dry run: it builds the same way, but the release
-# is a draft, so nothing is published.
+# workflow_dispatch is the dry run. It only accepts a v0.0.0-dryrun-* tag, so
+# it cannot replace a real release, and its release is never published.
 on:
   push:
     tags:
@@ -22,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Version to stamp and name the draft release with (e.g. v0.0.0-dryrun)'
+        description: 'Dry-run tag, v0.0.0-dryrun-<name>; the release stays a draft'
         required: true
 
 env:
@@ -32,20 +34,37 @@ permissions:
   contents: read
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Validate the version and the dry-run tag
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "VERSION '${VERSION}' is not vX.Y.Z or vX.Y.Z-suffix" >&2
+            exit 1
+          fi
+          if [[ "${DRY_RUN}" == true && ! "${VERSION}" =~ ^v0\.0\.0-dryrun- ]]; then
+            echo "a dispatch may only release a v0.0.0-dryrun-* tag, not '${VERSION}'" >&2
+            exit 1
+          fi
+
+      - name: Set the build targets
+        id: targets
+        run: |
+          echo 'targets=[{"goos":"linux","goarch":"amd64"},{"goos":"linux","goarch":"arm64"},{"goos":"darwin","goarch":"amd64"},{"goos":"darwin","goarch":"arm64"}]' >> "${GITHUB_OUTPUT}"
+
   build:
+    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
+        include: ${{ fromJSON(needs.check.outputs.targets) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -90,12 +109,16 @@ jobs:
 
   release:
     # Waits for every matrix leg. A leg that fails or times out skips this
-    # job, so nothing is published with binaries missing.
-    needs: build
+    # job, so no release is created.
+    needs: [check, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TARGETS: ${{ needs.check.outputs.targets }}
     steps:
       - name: Download binary artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -104,11 +127,26 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Publish release
+      - name: Check every binary and checksum downloaded
+        run: |
+          expected=$(( $(jq length <<< "${TARGETS}") * 2 ))
+          actual=$(find dist -type f | wc -l)
+          if [[ "${actual}" -ne "${expected}" ]]; then
+            echo "expected ${expected} files in dist/, found ${actual}" >&2
+            exit 1
+          fi
+
+      # Created as a draft, so no release is visible until every file is attached.
+      - name: Create the draft release with every file
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ env.VERSION }}
           files: dist/*
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          fail_on_unmatched_files: true
+          draft: true
           prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
+
+      - name: Publish the release
+        if: ${{ github.event_name == 'push' }}
+        run: gh release edit "${VERSION}" --draft=false
