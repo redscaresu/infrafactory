@@ -11,15 +11,19 @@
 #
 # Env vars:
 #   BASE_REF             — git ref to diff against (default: origin/main)
-#   PER_SCENARIO_TIMEOUT — seconds per scenario before its process tree is
-#                          signalled (default: 720)
-#   KILL_AFTER           — seconds between that TERM and a KILL (default: 30)
+#   PER_SCENARIO_TIMEOUT — seconds per scenario before the run is TERMed
+#                          (default: 720)
+#   KILL_AFTER           — seconds after that TERM before the leftovers are
+#                          KILLed; keep it above infrafactory's 20s tofu
+#                          cancel fallback (default: 30)
 #   MAX_SCENARIOS        — abort if more than N scenarios changed
 #                          (default: 10 — protects against accidental
 #                          mass-rename PRs)
 #   RESULTS, LOG_DIR     — where the results TSV and logs go (see
 #                          scenario_gate_paths.sh)
-# Needs pgrep (procps on Linux, built into macOS).
+# A deadline or an INT/TERM to this script TERMs infrafactory only, lets its
+# guard interrupt tofu, then KILLs what is left after KILL_AFTER. Needs pgrep
+# (procps on Linux, built into macOS).
 set -uo pipefail
 
 BASE_REF="${BASE_REF:-origin/main}"
@@ -30,9 +34,8 @@ KILL_AFTER="${KILL_AFTER:-30}"
 . "$(dirname "$0")/scenario_gate_paths.sh"
 mkdir -p "$LOG_DIR"
 
-# descendants <pid>: prints the pid and every process below it. A tofu child
-# sets its own process group, but its parent is still infrafactory, so this
-# walk finds it.
+# descendants <pid>: prints the pid and every process below it, so a live run's
+# tofu children (own process group, parent infrafactory) are found too.
 descendants() {
   local child
   echo "$1"
@@ -41,29 +44,67 @@ descendants() {
   done
 }
 
-# run_scenario <file> <log> <marker>: runs one scenario under the deadline.
-# When the deadline passes it writes <marker> and signals the run's whole
-# process tree: TERM, then KILL after KILL_AFTER. Whichever signal ends the run,
-# the caller reads the marker, so the row says timeout.
+# escalate <pid>: runs KILL_AFTER after the TERM that was sent to the run. It
+# KILLs what is left: the live run's tree, then the run's process group, which
+# still holds orphans it spawned after it exited. infrafactory's own guard gets
+# the KILL_AFTER window first; its tofu cleanup takes ~20s.
+escalate() {
+  local tree
+  sleep "$KILL_AFTER"
+  if kill -0 "$1" 2>/dev/null; then
+    read -r -d "" -a tree <<< "$(descendants "$1")"
+    kill -KILL "${tree[@]}" 2>/dev/null
+  fi
+  kill -KILL -- "-$1" 2>/dev/null
+}
+
+# stop_watchdog <pid>: stops a watchdog that has no deadline to enforce, and
+# the sleep it is in.
+stop_watchdog() {
+  pkill -KILL -P "$1" 2>/dev/null
+  kill -KILL "$1" 2>/dev/null
+}
+
+# cancel_run <pid> <watchdog> <exit-code>: the gate was interrupted. Stops the
+# deadline, TERMs the run, waits out the escalation, then exits.
+cancel_run() {
+  trap '' INT TERM
+  stop_watchdog "$2"
+  kill -TERM "$1" 2>/dev/null
+  escalate "$1"
+  exit "$3"
+}
+
+# run_scenario <file> <log> <marker>: runs one scenario under a deadline. At
+# the deadline, if the run is still alive, it writes <marker>, TERMs the run and
+# escalates. The run gets its own process group (set -m) so the escalation can
+# reach it. Whatever ends the run, the caller reads the marker: it says timeout.
 run_scenario() {
-  local f="$1" log="$2" marker="$3" pid watchdog tree
+  local f="$1" log="$2" marker="$3" pid watchdog
   rm -f "$marker"
+  set -m
   ./bin/infrafactory run --clean "$f" > "$log" 2>&1 &
   pid=$!
+  set +m
   (
     sleep "$PER_SCENARIO_TIMEOUT"
+    kill -0 "$pid" 2>/dev/null || exit 0
     : > "$marker"
-    read -r -d "" -a tree <<< "$(descendants "$pid")"
-    kill -TERM "${tree[@]}" 2>/dev/null
-    sleep "$KILL_AFTER"
-    kill -KILL "${tree[@]}" 2>/dev/null
+    kill -TERM "$pid" 2>/dev/null
+    escalate "$pid"
   ) &
   watchdog=$!
-  trap 'kill -TERM $(descendants "$pid") 2>/dev/null; exit 130' INT
+  trap 'cancel_run "$pid" "$watchdog" 130' INT
+  trap 'cancel_run "$pid" "$watchdog" 143' TERM
   wait "$pid"
-  trap - INT
-  read -r -d "" -a tree <<< "$(descendants "$watchdog")"
-  kill -KILL "${tree[@]}" 2>/dev/null
+  trap - INT TERM
+  if [ -f "$marker" ]; then
+    # The deadline fired: the escalation must finish even though the run is gone.
+    wait "$watchdog"
+    return
+  fi
+  stop_watchdog "$watchdog"
+  wait "$watchdog" 2>/dev/null
 }
 
 # Discover changed scenarios. Diff filter AM = added + modified; we

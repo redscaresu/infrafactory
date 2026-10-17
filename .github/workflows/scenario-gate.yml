@@ -55,10 +55,12 @@ jobs:
     needs: llm-credentials
     if: needs.llm-credentials.outputs.configured == 'true'
     runs-on: ubuntu-latest
-    # Worst case for the gate's own limits: MAX_SCENARIOS x (PER_SCENARIO_TIMEOUT
-    # + KILL_AFTER) / 60 minutes, the scenario budget. Mock start, build and
-    # upload come on top. The job timeout must exceed the budget, or GitHub
-    # cancels a slow run before the script's limits fire.
+    # A scenario's deadline TERMs infrafactory, whose guard stops its tofu
+    # children, then KILLs what is left after KILL_AFTER. Worst case for the
+    # gate's own limits: MAX_SCENARIOS x (PER_SCENARIO_TIMEOUT + KILL_AFTER) / 60
+    # minutes, the scenario budget. Mock start, build and upload come on top.
+    # The job timeout must exceed the budget, or GitHub cancels a slow run
+    # before the script's limits fire.
     # scenario_change_gate_test.sh reads the defaults and checks it.
     timeout-minutes: 150
     env:
