@@ -6,8 +6,9 @@
 # parses, has a jobs mapping, and every job sets timeout-minutes to a positive
 # number or a ${{ }} expression; a missing directory, a parse error or a
 # missing PyYAML fails too. A job that calls a reusable workflow (job-level
-# uses:) is skipped: GitHub rejects timeout-minutes there, and the called
-# workflow's own jobs carry the timeout.
+# uses:) is skipped, since GitHub rejects timeout-minutes there. A local
+# ./.github/workflows/ callee is checked through its own file; a remote
+# owner/repo/...@ref callee is not checked at all.
 set -euo pipefail
 
 dir="${1:-.github/workflows}"
@@ -28,7 +29,7 @@ files = sorted(glob.glob(f"{sys.argv[1]}/*.yml") + glob.glob(f"{sys.argv[1]}/*.y
 if not files:
     sys.exit(f"no workflow files under {sys.argv[1]}")
 
-missing = []
+missing, skipped = [], []
 for path in files:
     with open(path) as f:
         jobs = (yaml.safe_load(f) or {}).get("jobs")
@@ -36,6 +37,7 @@ for path in files:
         sys.exit(f"{path}: no jobs mapping")
     for name, job in jobs.items():
         if isinstance(job, dict) and "uses" in job:
+            skipped.append(f"{name} ({job['uses']})")
             continue
         timeout = job.get("timeout-minutes") if isinstance(job, dict) else None
         if not valid(timeout):
@@ -44,5 +46,8 @@ for path in files:
 if missing:
     print("\n".join(missing))
     sys.exit(1)
-print(f"workflow timeouts: every job in {len(files)} files sets timeout-minutes")
+if skipped:
+    print(f"workflow timeouts: skipped reusable-workflow calls {', '.join(skipped)}; every other job in {len(files)} files sets timeout-minutes")
+else:
+    print(f"workflow timeouts: every job in {len(files)} files sets timeout-minutes")
 PY
