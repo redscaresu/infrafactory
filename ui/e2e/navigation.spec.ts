@@ -48,3 +48,9 @@ test.describe('Navigation', () => {
     await expect(page.locator('main').getByText('web-app-paris', { exact: true })).toBeVisible();
   });
 });
+
+test.describe('Throwaway report proof', () => {
+  test('forced failure to exercise the report upload', async () => {
+    expect(1).toBe(2);
+  });
+});
