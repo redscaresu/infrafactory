@@ -2,34 +2,74 @@ name: Release
 
 # S150-T4. Third-party actions are pinned to commit SHAs in this workflow
 # because it runs with elevated capability -- a mutable tag can be repointed
-# at new code by a compromised upstream, and this job can see a contents: write token.
-# The `# vN` comment is what lets dependabot keep the pins current.
+# at new code by a compromised upstream, and the release job holds a
+# contents: write token. The `# vN` comment is what lets dependabot keep the
+# pins current.
 #
 # ci.yml and doc-hygiene.yml stay on tags: they are read-only and hold no
 # secrets, so pinning there would be churn without a threat to answer.
+#
+# The matrix only builds and uploads artifacts. The release job runs only
+# after every leg succeeds, and it creates the release as a draft. It
+# publishes the draft last, once every file is attached. On a first run, a
+# failed leg or a failed upload leaves a draft or no release at all. A re-run
+# against an already-published tag is not covered: softprops keeps that
+# release's draft flag and re-uploads onto it, so a failure partway can leave
+# it missing binaries.
+#
+# A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
+# accepts only that form. So the dry run cannot replace a real release, and
+# its release is never published.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Dry-run tag, v0.0.0-dryrun-<name>; the release stays a draft'
+        required: true
+
+env:
+  VERSION: ${{ inputs.tag || github.ref_name }}
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Validate the version and the dry-run tag
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "VERSION '${VERSION}' is not vX.Y.Z or vX.Y.Z-suffix" >&2
+            exit 1
+          fi
+          is_dryrun=false
+          [[ "${VERSION}" == v0.0.0-dryrun-* ]] && is_dryrun=true
+          if [[ "${is_dryrun}" != "${DRY_RUN}" ]]; then
+            echo "only workflow_dispatch may release a v0.0.0-dryrun-* tag, and dispatch only those: '${VERSION}'" >&2
+            exit 1
+          fi
+
+      - name: Set the build targets
+        id: targets
+        run: |
+          echo 'targets=[{"goos":"linux","goarch":"amd64"},{"goos":"linux","goarch":"arm64"},{"goos":"darwin","goarch":"amd64"},{"goos":"darwin","goarch":"arm64"}]' >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
+        include: ${{ fromJSON(needs.check.outputs.targets) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -60,15 +100,56 @@ jobs:
         run: |
           mkdir -p dist
           BINARY_NAME="infrafactory-${GOOS}-${GOARCH}"
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/${BINARY_NAME}" ./cmd/infrafactory
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/${BINARY_NAME}" ./cmd/infrafactory
           (cd dist && sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256")
 
-      - name: Upload binary to release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          files: |
+          name: infrafactory-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
             dist/infrafactory-${{ matrix.goos }}-${{ matrix.goarch }}
             dist/infrafactory-${{ matrix.goos }}-${{ matrix.goarch }}.sha256
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          if-no-files-found: error
+
+  release:
+    # Waits for every matrix leg. A leg that fails or times out skips this
+    # job, so no release is created.
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TARGETS: ${{ needs.check.outputs.targets }}
+    steps:
+      - name: Download binary artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: infrafactory-*
+          path: dist
+          merge-multiple: true
+
+      # dist/ must hold exactly the binary and .sha256 of each target, by name,
+      # so a missing, renamed or extra file fails before anything is created.
+      - name: Check dist/ holds exactly the expected files
+        run: |
+          expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
+          diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
+
+      # Created as a draft, so no release is visible until every file is attached.
+      - name: Create the draft release with every file
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          tag_name: ${{ env.VERSION }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          draft: true
+          prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
+
+      - name: Publish the release
+        if: ${{ github.event_name == 'push' }}
+        run: gh release edit "${VERSION}" --draft=false
