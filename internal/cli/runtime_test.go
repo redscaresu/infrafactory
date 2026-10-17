@@ -413,6 +413,13 @@ const schemaGuardEnv = "INFRAFACTORY_TEST_SCHEMA_GUARD"
 // realPATH is PATH before guardSchemaExtraction put its tofu first.
 var realPATH = os.Getenv("PATH")
 
+// passSchemaGuard is for a test that extracts a real provider schema on
+// purpose: it restores the PATH guardSchemaExtraction changed.
+func passSchemaGuard(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH", realPATH)
+}
+
 // guardSchemaExtraction puts a tofu first on PATH that refuses provider
 // schema extraction (tofu run in an infrafactory-schema-* dir) and hands
 // every other command to the real tofu. A runtime that missed
@@ -571,8 +578,8 @@ func TestBuildRuntimeExtractsSchemaWithRealTofu(t *testing.T) {
 	if os.Getenv("INFRAFACTORY_ENABLE_E2E") != "1" {
 		t.Skip("set INFRAFACTORY_ENABLE_E2E=1 to enable e2e tests")
 	}
-	t.Setenv("PATH", realPATH) // past the schema guard
-	scrubtest.Register(t)      // buildRuntime registers; undo it when the test ends
+	passSchemaGuard(t)
+	scrubtest.Register(t) // buildRuntime registers; undo it when the test ends
 	opts := defaultRuntimeOptions()
 	opts.configLoader = func(string) (config.Config, error) {
 		cfg := config.Default()
