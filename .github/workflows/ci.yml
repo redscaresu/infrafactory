@@ -65,6 +65,7 @@ jobs:
     needs: board
     if: needs.board.outputs.skip == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -86,6 +87,7 @@ jobs:
     needs: [board, doc-links, test-full]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Result
         env:
@@ -107,6 +109,7 @@ jobs:
     needs: [board, aws-e2e-full]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Result
         env:
@@ -125,6 +128,7 @@ jobs:
     needs: board
     if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       # M78 — share provider downloads across runs (~200MB saved per
       # CI run; mirrors mockway's CI pattern).
@@ -270,6 +274,7 @@ jobs:
     needs: board
     if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       TF_PLUGIN_CACHE_DIR: ~/.terraform.d/plugin-cache
     steps:
@@ -348,7 +353,10 @@ jobs:
           go build -C ../fakeaws -o /dev/null ./cmd/fakeaws
           tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
           [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
-          go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
+          # -timeout bounds the test binary only, and must stay under
+          # aws-e2e-full's timeout-minutes (20), so a hung test fails with go's
+          # goroutine dump, not as a runner cancel.
+          go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -timeout 15m -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
           for test in $tests; do
             grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
           done
@@ -356,6 +364,7 @@ jobs:
   govulncheck:
     needs: board
     if: ${{ !cancelled() && !(needs.board.result == 'success' && needs.board.outputs.skip == 'true') }}
+    timeout-minutes: 5
     # S150-T1. Nothing scanned Go dependencies for known vulnerabilities
     # before this, so a vulnerable module could ship silently.
     #
@@ -393,6 +402,7 @@ jobs:
     # does not run on fork PRs, so this job is the load-bearing
     # secret scan for OSS-fork contributions.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -405,6 +415,7 @@ jobs:
 
   build-binary:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
