@@ -20,12 +20,16 @@ set -uo pipefail
 BASE_REF="${BASE_REF:-origin/main}"
 PER_SCENARIO_TIMEOUT="${PER_SCENARIO_TIMEOUT:-720}"
 MAX_SCENARIOS="${MAX_SCENARIOS:-10}"
-RESULTS="${RESULTS:-/tmp/scenario_gate_results.tsv}"
-LOG_DIR="${LOG_DIR:-/tmp/scenario_gate_logs}"
-# The perl alarm kills the scenario with SIGALRM (14), so the shell reports
-# 128 + 14. It never returns 124 (GNU timeout's code), which is why a hang
-# used to be labelled with the generic failure instead of `timeout`.
-ALARM_RC=142
+KILL_AFTER="${KILL_AFTER:-30}"
+# shellcheck source=scripts/scenario_gate_paths.sh
+. "$(dirname "$0")/scenario_gate_paths.sh"
+# GNU timeout exits 124 when it stopped the command. -k sends KILL only if
+# TERM is ignored, and that exit (137) is a failure, not a labelled timeout.
+TIMEOUT_RC=124
+if ! command -v timeout > /dev/null; then
+  echo "scenario-gate: GNU timeout is required (macOS: brew install coreutils)" >&2
+  exit 2
+fi
 mkdir -p "$LOG_DIR"
 
 # Discover changed scenarios. Diff filter AM = added + modified; we
@@ -67,7 +71,7 @@ while IFS= read -r f; do
   echo "[$(date +%H:%M:%S)] starting $name"
   start=$(date +%s)
   log="$LOG_DIR/$name.log"
-  perl -e 'alarm shift; exec @ARGV' "$PER_SCENARIO_TIMEOUT" \
+  timeout -s TERM -k "$KILL_AFTER" "$PER_SCENARIO_TIMEOUT" \
     ./bin/infrafactory run --clean "$f" > "$log" 2>&1
   rc=$?
   end=$(date +%s)
@@ -75,8 +79,8 @@ while IFS= read -r f; do
 
   status=$(grep -E "^Status:" "$log" | tail -1 | awk -F': ' '{print $2}' || echo "no-status")
   terminal=$(grep -E "^- run/terminal_reason:" "$log" | tail -1 | sed -E 's/.*pass \((.*)\)/\1/' || echo "no-terminal")
-  iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log" || echo "0")
-  if [ "$rc" -eq "$ALARM_RC" ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
+  iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log" || true)
+  if [ "$rc" -eq "$TIMEOUT_RC" ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
 
   echo -e "${name}\t${status}\t${iters}\t${terminal}\t${elapsed}" >> "$RESULTS"
   if [ "$status" = "success" ] && [ "$terminal" = "target_reached" ]; then

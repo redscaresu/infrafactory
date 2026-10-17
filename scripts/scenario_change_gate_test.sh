@@ -10,14 +10,14 @@ SCRIPT="${REPO_ROOT}/scripts/scenario_change_gate.sh"
 WORKFLOW="${REPO_ROOT}/.github/workflows/scenario-gate.yml"
 FAILURES=0
 
-# new_repo: a throwaway repo on main; a feature branch adds one scenario and
-# a stub `go` that builds a fake infrafactory which sleeps. Prints the path.
+# new_repo: a throwaway repo on main; a feature branch adds one scenario.
+# Prints the path. The stub `go` is a no-op, so the test's own fake binary stays.
 new_repo() {
   local dir stub
   dir="$(mktemp -d)"
   stub="${dir}-stub"
-  mkdir -p "${stub}"
-  printf '#!/bin/bash\nmkdir -p bin\nprintf "#!/bin/bash\\nexec sleep 30\\n" > bin/infrafactory\nchmod +x bin/infrafactory\n' > "${stub}/go"
+  mkdir -p "${stub}" "${dir}/bin"
+  printf '#!/bin/bash\nexit 0\n' > "${stub}/go"
   chmod +x "${stub}/go"
   git -C "${dir}" init -q -b main
   git -C "${dir}" config user.email t@t.t
@@ -31,6 +31,21 @@ new_repo() {
   echo "${dir}"
 }
 
+# write_fake_infrafactory <path>: a hung run. Its child runs in its own process
+# group (set -m, as the real run's Setpgid does) and is stopped only by the
+# SIGTERM handler, so a wrapper that sends KILL leaves the child alive.
+write_fake_infrafactory() {
+  cat > "$1" <<'EOF'
+#!/bin/bash
+set -m
+sleep 30 & child=$!
+echo "${child}" > "${CHILD_PID_FILE}"
+trap 'kill "${child}" 2>/dev/null; exit 1' TERM
+wait
+EOF
+  chmod +x "$1"
+}
+
 # check <name> <want> <got>: prints ok or FAIL with the line the run printed.
 check() {
   if [[ "$2" == "$3" ]]; then
@@ -42,16 +57,24 @@ check() {
 }
 
 test_timed_out_scenario_reads_timeout() {
-  local dir stub results logs status
+  local dir results pid alive rows status iters
   dir="$(new_repo)"
-  stub="${dir}-stub"
   results="${dir}/results.tsv"
-  logs="${dir}/logs"
-  (cd "${dir}" && PATH="${stub}:${PATH}" BASE_REF=main PER_SCENARIO_TIMEOUT=1 \
-    RESULTS="${results}" LOG_DIR="${logs}" bash "${SCRIPT}" > /dev/null 2>&1)
+  write_fake_infrafactory "${dir}/bin/infrafactory"
+  (cd "${dir}" && PATH="${dir}-stub:${PATH}" BASE_REF=main PER_SCENARIO_TIMEOUT=1 KILL_AFTER=5 \
+    CHILD_PID_FILE="${dir}/child.pid" RESULTS="${results}" LOG_DIR="${dir}/logs" \
+    bash "${SCRIPT}" > /dev/null 2>&1)
+  rows="$(wc -l < "${results}" | tr -d ' ')"
   status="$(awk -F'\t' '$1 == "hang" { print $2 }' "${results}")"
+  iters="$(awk -F'\t' '$1 == "hang" { print $3 }' "${results}")"
+  pid="$(cat "${dir}/child.pid")"
+  sleep 1
+  if kill -0 "${pid}" 2>/dev/null; then alive=yes; else alive=no; fi
+  check "one header and one row per scenario, no phantom row" "2" "${rows}"
   check "timed-out scenario row reads timeout" "timeout" "${status}"
-  rm -rf "${dir}" "${stub}"
+  check "timed-out scenario reports zero iterations" "0" "${iters}"
+  check "timed-out scenario's child is stopped" "no" "${alive}"
+  rm -rf "${dir}" "${dir}-stub"
 }
 
 # test_job_timeout_outlasts_scenario_budget: the job's timeout-minutes must

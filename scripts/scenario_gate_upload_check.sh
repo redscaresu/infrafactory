@@ -6,8 +6,8 @@
 # key is never uploaded, and the failure names the file, never the key.
 set -o pipefail
 
-RESULTS="${RESULTS:-/tmp/scenario_gate_results.tsv}"
-LOG_DIR="${LOG_DIR:-/tmp/scenario_gate_logs}"
+# shellcheck source=scripts/scenario_gate_paths.sh
+. "$(dirname "$0")/scenario_gate_paths.sh"
 
 if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   echo "scenario-gate: OPENROUTER_API_KEY is empty; cannot check the upload" >&2

@@ -135,7 +135,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload scenario logs on failure or cancel
-        if: (failure() || cancelled()) && steps.scan.outcome == 'success'
+        # Empty when the gate never wrote its files (mocks-up or the cap failed).
+        if: (failure() || cancelled()) && steps.scan.outcome == 'success' && steps.scan.outputs.files != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: scenario-gate-logs
