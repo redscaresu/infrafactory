@@ -87,7 +87,7 @@ jobs:
     needs: [board, doc-links, test-full]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - name: Result
         env:
@@ -109,7 +109,7 @@ jobs:
     needs: [board, aws-e2e-full]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - name: Result
         env:
@@ -353,9 +353,10 @@ jobs:
           go build -C ../fakeaws -o /dev/null ./cmd/fakeaws
           tests=$(grep -v '^#' .github/fakeaws-e2e-tests)
           [ -n "$tests" ] || { echo "no tests listed in .github/fakeaws-e2e-tests"; exit 1; }
-          # -timeout must stay under aws-e2e-full's timeout-minutes (20), so a
-          # hang fails here with go's goroutine dump, not as a runner cancel.
-          go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -timeout 18m -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
+          # -timeout bounds the test binary only, and must stay under
+          # aws-e2e-full's timeout-minutes (20), so a hung test fails with go's
+          # goroutine dump, not as a runner cancel.
+          go test ./internal/e2e ./internal/cli -run "^($(echo $tests | tr ' ' '|'))\$" -count=1 -timeout 15m -v | tee "$RUNNER_TEMP/aws-fakeaws.log"
           for test in $tests; do
             grep -q "^--- PASS: $test " "$RUNNER_TEMP/aws-fakeaws.log" || { echo "$test did not PASS"; exit 1; }
           done
