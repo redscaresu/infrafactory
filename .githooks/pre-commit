@@ -153,7 +153,7 @@ else
     export TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=1
     mkdir -p "$TF_PLUGIN_CACHE_DIR"
     # shellcheck disable=SC2086
-    go test -tags noui -timeout 60m $PKGS
+    go test -tags noui $PKGS
   fi
   if [ -n "$UI_CHANGED" ]; then
     echo "Running UI unit tests..."
