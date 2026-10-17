@@ -395,13 +395,29 @@ var recordedProviderSchema []byte
 type recordedSchemaRunner struct{}
 
 func (recordedSchemaRunner) Run(_ context.Context, cmd harness.Command) (harness.CommandResult, error) {
-	switch strings.Join(cmd.Args, " ") {
-	case "init":
-		return harness.CommandResult{}, nil
-	case "providers schema -json":
-		return harness.CommandResult{Stdout: recordedProviderSchema}, nil
+	if cmd.Name == "tofu" {
+		switch strings.Join(cmd.Args, " ") {
+		case "init":
+			return harness.CommandResult{}, nil
+		case "providers schema -json":
+			return harness.CommandResult{Stdout: recordedProviderSchema}, nil
+		}
 	}
 	return harness.CommandResult{}, fmt.Errorf("recordedSchemaRunner: unexpected command %s %v", cmd.Name, cmd.Args)
+}
+
+// countingSchemaRunner is recordedSchemaRunner, counting the schemas it
+// returns, for a runtime whose generator a test cannot replace.
+type countingSchemaRunner struct {
+	schemas int
+}
+
+func (r *countingSchemaRunner) Run(ctx context.Context, cmd harness.Command) (harness.CommandResult, error) {
+	result, err := recordedSchemaRunner{}.Run(ctx, cmd)
+	if err == nil && len(result.Stdout) > 0 {
+		r.schemas++
+	}
+	return result, err
 }
 
 // providersTFEchoRunner is a fake harness.CommandRunner whose Run reads

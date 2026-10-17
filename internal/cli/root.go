@@ -45,8 +45,9 @@ func WithRuntimeDependencies(deps RuntimeDependencies) RootOption {
 	}
 }
 
-// withSchemaRunner sets the runner the commands extract provider schemas
-// with, so tests of the root command never download a provider.
+// withSchemaRunner sets the runner that commands built with
+// rootConfig.withRuntime, generate and run among them, extract provider
+// schemas with. The ui subcommand builds its own runtimes and ignores it.
 func withSchemaRunner(runner harness.CommandRunner) RootOption {
 	return func(cfg *rootConfig) {
 		cfg.schemaRunner = runner
