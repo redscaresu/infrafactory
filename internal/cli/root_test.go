@@ -106,16 +106,18 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	root := NewRootCmd()
 	expected := []string{"init", "generate", "validate", "test", "run", "mock", "ui"}
 
+	// Find returns the deepest match without error, so a missing `mock <sub>`
+	// comes back as `mock`: the name is the check, not the error.
 	for _, name := range expected {
-		if _, _, err := root.Find([]string{name}); err != nil {
-			t.Fatalf("expected command %q to be wired: %v", name, err)
-		}
+		found, _, err := root.Find([]string{name})
+		require.NoError(t, err, name)
+		require.Equal(t, name, found.Name())
 	}
 
 	for _, sub := range []string{"start", "stop", "status", "logs"} {
-		if _, _, err := root.Find([]string{"mock", sub}); err != nil {
-			t.Fatalf("expected command %q to be wired: %v", "mock "+sub, err)
-		}
+		found, _, err := root.Find([]string{"mock", sub})
+		require.NoError(t, err, "mock "+sub)
+		require.Equal(t, sub, found.Name(), "mock "+sub)
 	}
 }
 
