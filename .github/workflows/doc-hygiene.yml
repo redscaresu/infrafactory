@@ -23,6 +23,9 @@ jobs:
         # being used as a bypass is worth pinning in CI.
         run: bash scripts/check_doc_hygiene_test.sh
 
+      - name: Every workflow job sets timeout-minutes
+        run: bash scripts/check_workflow_timeouts.sh
+
       - name: Validate STATUS/ADR sync
         run: |
           bash scripts/check_doc_hygiene.sh \
