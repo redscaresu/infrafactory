@@ -195,7 +195,7 @@ func TestGenerateCommandReturnsRuntimeErrorWithDefaultGenerator(t *testing.T) {
 	t.Parallel()
 
 	configPath := writeConfigFixture(t)
-	root := NewRootCmd()
+	root := NewRootCmd(withSchemaRunner(recordedSchemaRunner{}))
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	root.SetArgs([]string{"generate", filepath.Join("..", "..", "scenarios", "training", "web-app-paris.yaml"), "--config", configPath})
