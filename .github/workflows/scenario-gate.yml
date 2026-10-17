@@ -55,10 +55,11 @@ jobs:
     needs: llm-credentials
     if: needs.llm-credentials.outputs.configured == 'true'
     runs-on: ubuntu-latest
-    # The gate runs at most MAX_SCENARIOS x PER_SCENARIO_TIMEOUT seconds of
-    # scenarios: 10 x 720 / 60 = 120 min. The rest is mock start, build and
-    # upload. The job timeout must exceed that, or GitHub cancels a slow run
-    # before the script's own limits fire. scenario_change_gate_test.sh checks it.
+    # Worst case for the gate's own limits: MAX_SCENARIOS x (PER_SCENARIO_TIMEOUT
+    # + KILL_AFTER) / 60 minutes, the scenario budget. Mock start, build and
+    # upload come on top. The job timeout must exceed the budget, or GitHub
+    # cancels a slow run before the script's limits fire.
+    # scenario_change_gate_test.sh reads the defaults and checks it.
     timeout-minutes: 150
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

@@ -11,10 +11,15 @@
 #
 # Env vars:
 #   BASE_REF             — git ref to diff against (default: origin/main)
-#   PER_SCENARIO_TIMEOUT — seconds per scenario (default: 720)
+#   PER_SCENARIO_TIMEOUT — seconds per scenario before its process tree is
+#                          signalled (default: 720)
+#   KILL_AFTER           — seconds between that TERM and a KILL (default: 30)
 #   MAX_SCENARIOS        — abort if more than N scenarios changed
 #                          (default: 10 — protects against accidental
 #                          mass-rename PRs)
+#   RESULTS, LOG_DIR     — where the results TSV and logs go (see
+#                          scenario_gate_paths.sh)
+# Needs pgrep (procps on Linux, built into macOS).
 set -uo pipefail
 
 BASE_REF="${BASE_REF:-origin/main}"
@@ -23,14 +28,43 @@ MAX_SCENARIOS="${MAX_SCENARIOS:-10}"
 KILL_AFTER="${KILL_AFTER:-30}"
 # shellcheck source=scripts/scenario_gate_paths.sh
 . "$(dirname "$0")/scenario_gate_paths.sh"
-# GNU timeout exits 124 when it stopped the command. -k sends KILL only if
-# TERM is ignored, and that exit (137) is a failure, not a labelled timeout.
-TIMEOUT_RC=124
-if ! command -v timeout > /dev/null; then
-  echo "scenario-gate: GNU timeout is required (macOS: brew install coreutils)" >&2
-  exit 2
-fi
 mkdir -p "$LOG_DIR"
+
+# descendants <pid>: prints the pid and every process below it. A tofu child
+# sets its own process group, but its parent is still infrafactory, so this
+# walk finds it.
+descendants() {
+  local child
+  echo "$1"
+  for child in $(pgrep -P "$1"); do
+    descendants "$child"
+  done
+}
+
+# run_scenario <file> <log> <marker>: runs one scenario under the deadline.
+# When the deadline passes it writes <marker> and signals the run's whole
+# process tree: TERM, then KILL after KILL_AFTER. Whichever signal ends the run,
+# the caller reads the marker, so the row says timeout.
+run_scenario() {
+  local f="$1" log="$2" marker="$3" pid watchdog tree
+  rm -f "$marker"
+  ./bin/infrafactory run --clean "$f" > "$log" 2>&1 &
+  pid=$!
+  (
+    sleep "$PER_SCENARIO_TIMEOUT"
+    : > "$marker"
+    read -r -d "" -a tree <<< "$(descendants "$pid")"
+    kill -TERM "${tree[@]}" 2>/dev/null
+    sleep "$KILL_AFTER"
+    kill -KILL "${tree[@]}" 2>/dev/null
+  ) &
+  watchdog=$!
+  trap 'kill -TERM $(descendants "$pid") 2>/dev/null; exit 130' INT
+  wait "$pid"
+  trap - INT
+  read -r -d "" -a tree <<< "$(descendants "$watchdog")"
+  kill -KILL "${tree[@]}" 2>/dev/null
+}
 
 # Discover changed scenarios. Diff filter AM = added + modified; we
 # don't run deleted/renamed-source scenarios because the file is gone.
@@ -71,16 +105,15 @@ while IFS= read -r f; do
   echo "[$(date +%H:%M:%S)] starting $name"
   start=$(date +%s)
   log="$LOG_DIR/$name.log"
-  timeout -s TERM -k "$KILL_AFTER" "$PER_SCENARIO_TIMEOUT" \
-    ./bin/infrafactory run --clean "$f" > "$log" 2>&1
-  rc=$?
+  marker="$LOG_DIR/$name.deadline"
+  run_scenario "$f" "$log" "$marker"
   end=$(date +%s)
   elapsed=$((end - start))
 
   status=$(grep -E "^Status:" "$log" | tail -1 | awk -F': ' '{print $2}' || echo "no-status")
   terminal=$(grep -E "^- run/terminal_reason:" "$log" | tail -1 | sed -E 's/.*pass \((.*)\)/\1/' || echo "no-terminal")
   iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log" || true)
-  if [ "$rc" -eq "$TIMEOUT_RC" ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
+  if [ -f "$marker" ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
 
   echo -e "${name}\t${status}\t${iters}\t${terminal}\t${elapsed}" >> "$RESULTS"
   if [ "$status" = "success" ] && [ "$terminal" = "target_reached" ]; then
