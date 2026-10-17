@@ -143,12 +143,14 @@ else
   if [ -n "$PKGS" ]; then
     echo "Running go test for touched packages:"
     echo "$PKGS" | sed 's/^/  /'
-    # Tests that run `tofu init` for provider-schema extraction share a plugin
-    # cache, as CI's test-full job does. Even warm, each init takes 60-80s on
-    # a laptop (registry round trips), so tests that wait on the 60s schema
-    # deadline push internal/cli past go's 10m default. The ceiling is sized
-    # from a warm-cache run on 2026-10-17.
+    # Provider-schema extraction in internal/cli/runtime.go (EnsureProviderSchema)
+    # runs `tofu init` in a fresh temp dir. The shared plugin cache plus the
+    # bypass below cut one AWS init from 118s to 1s on 2026-10-17. The bypass
+    # skips the lock-file checksum check. The schema temp dirs have no lock
+    # file, so nothing a lock file would have checked is skipped. The cache
+    # is still filled by verified registry installs.
     export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-$HOME/.terraform.d/plugin-cache}"
+    export TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=1
     mkdir -p "$TF_PLUGIN_CACHE_DIR"
     # shellcheck disable=SC2086
     go test -tags noui -timeout 60m $PKGS
