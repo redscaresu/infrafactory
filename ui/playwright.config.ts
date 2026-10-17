@@ -19,6 +19,10 @@ export default defineConfig({
   // 30s test timeout.
   workers: 1,
   fullyParallel: false,
+  // CI uploads ui/playwright-report/ on failure (.github/workflows/ci.yml).
+  // Without the html reporter that directory is never written, so the
+  // upload finds nothing. Local runs keep the list output only.
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: ORIGIN,
     headless: true,
