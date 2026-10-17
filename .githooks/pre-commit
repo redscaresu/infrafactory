@@ -143,8 +143,18 @@ else
   if [ -n "$PKGS" ]; then
     echo "Running go test for touched packages:"
     echo "$PKGS" | sed 's/^/  /'
+    # Provider-schema extraction in internal/cli/runtime.go (EnsureProviderSchema)
+    # runs `tofu init` in a fresh temp dir. With a warm plugin cache, the
+    # variable below lets that init use the cache: one AWS init took 1s, not
+    # 118s, on 2026-10-17. With a lock file present, tofu still checks its
+    # recorded checksums. The variable only lets it use the cache for a
+    # provider the lock file does not yet record. Test dirs are thrown away.
+    # A cold cache is slow, and the 60m timeout covers that fallback.
+    export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-$HOME/.terraform.d/plugin-cache}"
+    export TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=1
+    mkdir -p "$TF_PLUGIN_CACHE_DIR"
     # shellcheck disable=SC2086
-    go test -tags noui $PKGS
+    go test -tags noui -timeout 60m $PKGS
   fi
   if [ -n "$UI_CHANGED" ]; then
     echo "Running UI unit tests..."
