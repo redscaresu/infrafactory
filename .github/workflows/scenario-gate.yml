@@ -55,7 +55,11 @@ jobs:
     needs: llm-credentials
     if: needs.llm-credentials.outputs.configured == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The gate runs at most MAX_SCENARIOS x PER_SCENARIO_TIMEOUT seconds of
+    # scenarios: 10 x 720 / 60 = 120 min. The rest is mock start, build and
+    # upload. The job timeout must exceed that, or GitHub cancels a slow run
+    # before the script's own limits fire. scenario_change_gate_test.sh checks it.
+    timeout-minutes: 150
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -114,14 +118,28 @@ jobs:
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
         run: bash scripts/scenario_change_gate.sh
 
-      - name: Upload scenario logs on failure or cancel
+      - name: Check scenario logs for the API key
+        # Fails the step (so no upload) if any file holds the key's value. The
+        # list it prints is the upload's only input, so the artifact is named
+        # files only, never the whole log directory.
+        id: scan
         if: failure() || cancelled()
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          bash scripts/scenario_gate_upload_check.sh > "$RUNNER_TEMP/upload-list"
+          {
+            echo "files<<UPLOAD_LIST"
+            cat "$RUNNER_TEMP/upload-list"
+            echo "UPLOAD_LIST"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload scenario logs on failure or cancel
+        if: (failure() || cancelled()) && steps.scan.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: scenario-gate-logs
-          path: |
-            /tmp/scenario_gate_logs/
-            /tmp/scenario_gate_results.tsv
+          path: ${{ steps.scan.outputs.files }}
 
       - name: Stop mocks
         if: always()
