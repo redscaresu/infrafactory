@@ -100,25 +100,28 @@ func ownPersistentPreRuns(group *cobra.Command) []string {
 	return paths
 }
 
+// The full name sets, so a dropped command and an unlisted new one both fail.
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
 
 	root := NewRootCmd()
-	expected := []string{"init", "generate", "validate", "test", "run", "mock", "ui"}
+	assert.ElementsMatch(t, []string{
+		"init", "generate", "validate", "test", "run", "reap", "deploy",
+		"live", "pitfalls", "mock", "rehearse", "ui",
+	}, commandNames(root))
 
-	// Find returns the deepest match without error, so a missing `mock <sub>`
-	// comes back as `mock`: the name is the check, not the error.
-	for _, name := range expected {
-		found, _, err := root.Find([]string{name})
-		require.NoError(t, err, name)
-		require.Equal(t, name, found.Name())
-	}
+	mock, _, err := root.Find([]string{"mock"})
+	require.NoError(t, err)
+	require.Equal(t, "mock", mock.Name())
+	assert.ElementsMatch(t, []string{"start", "stop", "status", "logs", "reset"}, commandNames(mock))
+}
 
-	for _, sub := range []string{"start", "stop", "status", "logs"} {
-		found, _, err := root.Find([]string{"mock", sub})
-		require.NoError(t, err, "mock "+sub)
-		require.Equal(t, sub, found.Name(), "mock "+sub)
+func commandNames(cmd *cobra.Command) []string {
+	var names []string
+	for _, c := range cmd.Commands() {
+		names = append(names, c.Name())
 	}
+	return names
 }
 
 func TestInitWritesScaffoldAndPrintsNextSteps(t *testing.T) {
