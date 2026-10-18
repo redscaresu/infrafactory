@@ -668,6 +668,7 @@ adr-index:
 
 doc-hygiene:
 	@bash scripts/check_doc_hygiene.sh $$(git merge-base origin/main HEAD) HEAD
+	@bash scripts/check_workflow_timeouts.sh
 
 # --- Demo ------------------------------------------------------------
 # The on-stage path, in one command. See scripts/demo_gate.sh.
