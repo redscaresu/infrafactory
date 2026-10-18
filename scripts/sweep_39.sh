@@ -15,7 +15,8 @@
 #
 # SWEEP_RUN_TIMEOUT (seconds, default 1800) bounds each scenario's run. A run
 # that hits it is recorded as timed_out and the sweep moves on to the next. A run
-# that writes no run.json of its own is recorded as no_result. SWEEP_KILL_GRACE
+# that dies after its startup run.json (status "running") is recorded as crashed,
+# and one that writes no run.json at all as no_result. SWEEP_KILL_GRACE
 # (seconds, default 30) is the wait between TERM and KILL. MOCK_LOG_ROOT
 # (default /private/tmp) is where the panic gate looks for mock logs.
 #
@@ -51,10 +52,14 @@ mkdir -p "$SWEEP_DIR"
 cd "$ROOT" || exit 1
 unset CLAUDECODE
 
-# python3 runs the deadline script. Without it no run starts, and the rows
-# would have nothing to report.
+# The deadline script runs under python3. Without either, no run starts, and
+# the rows would have nothing to report.
 if ! command -v python3 >/dev/null; then
   echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT" >&2
+  exit 1
+fi
+if [ ! -f "$DEADLINE" ]; then
+  echo "sweep: deadline script not found at $DEADLINE" >&2
   exit 1
 fi
 
@@ -121,17 +126,53 @@ is_transport_failed_shape() {
   return 0
 }
 
+# Selective pitfall restoration. The blanket `git checkout pitfalls/`
+# discarded everything — including `avoid` entries, which are grounded
+# in confirmed deletion-as-fix runs (iter N failed, iter N+1 succeeded
+# after removing a resource). Replace with a selective merge that keeps
+# only `avoid` from the post-sweep file and discards `fix` + `descriptive`
+# as sweep noise. Runs at the end of a sweep and when one is stopped.
+restore_pitfalls() {
+  echo
+  echo "=== avoid-pitfall durability ==="
+  if [ ! -x ./bin/pitfall-merge ]; then
+    echo "WARN: bin/pitfall-merge not found; falling back to blanket discard"
+    git checkout pitfalls/ 2>/dev/null || true
+    avoid_total=0
+    return
+  fi
+  avoid_total=0
+  for c in aws gcp scaleway; do
+    out=$(./bin/pitfall-merge \
+      --pre "$PRE/$c.yaml" \
+      --post "pitfalls/$c.yaml" \
+      --out "pitfalls/$c.yaml" \
+      --keep avoid,live 2>&1)
+    echo "  $c: $out"
+    # kept_avoid, not kept_new: kept_new now also counts preserved
+    # `live` entries, and folding those in would let live preservation
+    # mask an avoid-learning regression -- a ratchet that reads healthy
+    # while the thing it measures is broken.
+    added=$(echo "$out" | grep -oE 'kept_avoid=[0-9]+' | sed 's/kept_avoid=//')
+    avoid_total=$((avoid_total + ${added:-0}))
+  done
+}
+
 # Ctrl-C or TERM stops the sweep. The deadline script runs in the background,
 # so the trap fires at once: it TERMs the run (the deadline script KILLs its
-# group after the grace) and the sweep exits by the same signal. Otherwise
-# each Ctrl-C would only end the scenario in progress.
+# group after the grace), the pitfalls are restored, and the sweep exits by
+# the same signal. Otherwise each Ctrl-C would only end the scenario in
+# progress. Signals are ignored while restoring, so a second Ctrl-C cannot
+# skip the restore.
 watchdog=
 stop_sweep() {
-  trap - INT TERM
+  trap '' INT TERM
   if [ -n "$watchdog" ]; then
     kill -TERM "$watchdog" 2>/dev/null
     wait "$watchdog" 2>/dev/null
   fi
+  restore_pitfalls
+  trap - INT TERM
   kill -"$1" $$
 }
 trap 'stop_sweep INT' INT
@@ -159,9 +200,9 @@ run_scenario() {
     RUN_STATUS=timed_out
     return
   fi
-  # Only a run.json written after RUN_MARKER came from this run. Anything else
-  # (a run that never started, or one that died before writing) is no_result;
-  # an older run.json would report a run that is not this one.
+  # Only a run.json written after RUN_MARKER came from this run. With none, the
+  # run never got as far as its startup write: no_result. An older run.json
+  # would report a run that is not this one.
   local rj
   rj=$(find ".infrafactory/runs/$name" -name run.json -newer "$RUN_MARKER" 2>/dev/null | sort | tail -1)
   if [ -z "$rj" ]; then
@@ -171,6 +212,12 @@ run_scenario() {
   fi
   RUN_TERMINAL=$(grep -oE '"terminal_reason":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
   RUN_STATUS=$(grep -oE '"status":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
+  # infrafactory writes status "running" at startup and the final status at
+  # exit, so a run that died partway still reads "running".
+  if [ "$RUN_STATUS" = running ]; then
+    RUN_TERMINAL=crashed
+    RUN_STATUS=crashed
+  fi
 }
 
 while IFS= read -r sc; do
@@ -285,36 +332,7 @@ done
 panic_lines=$(wc -l < "$PANIC_LOG" | tr -d ' ')
 echo "PANIC_LINES=$panic_lines (summary at $PANIC_LOG)"
 
-# Selective pitfall restoration. The blanket `git checkout pitfalls/`
-# discarded everything — including `avoid` entries, which are grounded
-# in confirmed deletion-as-fix runs (iter N failed, iter N+1 succeeded
-# after removing a resource). Replace with a selective merge that keeps
-# only `avoid` from the post-sweep file and discards `fix` + `descriptive`
-# as sweep noise.
-echo
-echo "=== avoid-pitfall durability ==="
-if [ ! -x ./bin/pitfall-merge ]; then
-  echo "WARN: bin/pitfall-merge not found; falling back to blanket discard"
-  git checkout pitfalls/ 2>/dev/null || true
-  avoid_total=0
-else
-  avoid_total=0
-  for c in aws gcp scaleway; do
-    out=$(./bin/pitfall-merge \
-      --pre "$PRE/$c.yaml" \
-      --post "pitfalls/$c.yaml" \
-      --out "pitfalls/$c.yaml" \
-      --keep avoid,live 2>&1)
-    echo "  $c: $out"
-    # kept_avoid, not kept_new: kept_new now also counts preserved
-    # `live` entries, and folding those in would let live preservation
-    # mask an avoid-learning regression -- a ratchet that reads healthy
-    # while the thing it measures is broken.
-    added=$(echo "$out" | grep -oE 'kept_avoid=[0-9]+' | sed 's/kept_avoid=//')
-    avoid_total=$((avoid_total + ${added:-0}))
-  done
-fi
-
+restore_pitfalls
 echo "AVOID_EMISSIONS=$avoid_total"
 if [ "$avoid_total" = "0" ]; then
   echo "WARN: zero avoid-pitfall emissions this sweep. Could be (a) the LLM stopped making deletion-recoverable mistakes, or (b) the avoid extractor broke. Cross-reference next sweep before treating as a regression."
