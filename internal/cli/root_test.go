@@ -102,7 +102,9 @@ func ownPersistentPreRuns(group *cobra.Command) []string {
 	return paths
 }
 
-// The full name sets, so a dropped command and an unlisted new one both fail.
+// The full name sets of the root and each listed parent, so a dropped command
+// and an unlisted new one under them both fail. A child under a parent the
+// table does not list passes unnoticed: add the parent as a row.
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
 
@@ -112,10 +114,25 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 		"live", "pitfalls", "mock", "rehearse", "ui",
 	}, commandNames(root))
 
-	mock, _, err := root.Find([]string{"mock"})
-	require.NoError(t, err)
-	require.Equal(t, "mock", mock.Name())
-	assert.ElementsMatch(t, []string{"start", "stop", "status", "logs", "reset"}, commandNames(mock))
+	for _, tc := range []struct {
+		path []string
+		want []string
+	}{
+		{[]string{"mock"}, []string{"start", "stop", "status", "logs", "reset"}},
+		{[]string{"live"}, []string{"ls", "teardown", "forget", "observe", "upgrade", "candidates", "learn", "reconcile", "reap"}},
+		{[]string{"pitfalls"}, []string{"retire", "check-avoid"}},
+		{[]string{"rehearse"}, []string{"prepare", "read", "end", "state", "plan", "apply", "destroy", "import"}},
+		{[]string{"rehearse", "state"}, []string{"mv"}},
+	} {
+		name := strings.Join(tc.path, " ")
+		t.Run(name, func(t *testing.T) {
+			parent, _, err := root.Find(tc.path)
+			require.NoError(t, err)
+			// Find falls back to the nearest parent without an error.
+			require.Equal(t, "infrafactory "+name, parent.CommandPath())
+			assert.ElementsMatch(t, tc.want, commandNames(parent))
+		})
+	}
 }
 
 func commandNames(cmd *cobra.Command) []string {
