@@ -118,6 +118,14 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 		"-record-requests", "-account", opts.account, "-region", opts.region)
 	// The token goes only here, never on argv, where ps shows it.
 	cmd.Env = []string{fakeawsAdminTokenEnv + "=" + token}
+	// No death signal (childSysProcAttr): fakeaws must outlive prepare, for
+	// the passthroughs and `rehearse end` (ADR-0042 § Start).
+	//
+	// ponytail: a prepare SIGKILLed after Start but before rehearsal.json
+	// is written leaves fakeaws running, recorded nowhere. A parent cannot
+	// drop a death signal once the child runs, so the fix is in fakeaws: a
+	// lease it exits on unless prepare releases it after the write. Add it
+	// if a killed prepare ever leaves one behind.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A nil Stdin is /dev/null.
 	cmd.Stdout, cmd.Stderr = logFile, logFile

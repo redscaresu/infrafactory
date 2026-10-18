@@ -13,9 +13,14 @@ import "syscall"
 // mid-flush where before it finished. A tofu left applying with no parent
 // is the worse outcome, so this takes the kill.
 //
-// The death signal reaches tofu alone, not the provider plugins it
-// started. It fires when the thread that started the child exits, so Run
-// holds its OS thread until the child is reaped.
+// It fires when the thread that started the child exits, so Run holds
+// its OS thread until the child is reaped.
+//
+// ponytail: the death signal reaches tofu alone, not the provider plugins
+// it started, and no one is left to signal their group. The kernel has
+// no group-wide death signal, so the fix is the watchdog
+// exec_runner_other.go names; add it if a killed run leaves a provider
+// running.
 func childSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 }
