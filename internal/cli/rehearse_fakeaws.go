@@ -59,10 +59,16 @@ const fakeawsBindFailure = "address already in use"
 var (
 	errRehearsalFakeawsExited = errors.New("fakeaws exited before it was ready")
 	errRehearsalFakeawsBind   = errors.New("fakeaws could not bind its port")
+	errRehearsalFakeawsStop   = errors.New("stop failed")
 )
 
 type rehearsalFakeawsOpts struct {
 	bin, dir, account, region string
+	// started, when set, is called with each try's pid, port and token
+	// right after its Start, before any check, so a starter killed during
+	// the checks leaves what stops it. A try it fails is stopped and
+	// refused.
+	started func(rehearsalFakeaws) error
 }
 
 // rehearsalFakeaws is a started fakeaws: its pid, which is also its
@@ -120,12 +126,6 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 	cmd.Env = []string{fakeawsAdminTokenEnv + "=" + token}
 	// No death signal (childSysProcAttr): fakeaws must outlive prepare, for
 	// the passthroughs and `rehearse end` (ADR-0042 § Start).
-	//
-	// ponytail: a prepare SIGKILLed after Start but before rehearsal.json
-	// is written leaves fakeaws running on the rehearsal's db, and `rehearse
-	// end` on that rehearsal finds no record, signals nothing and removes
-	// the dir. The token is known before Start, so the fix is to record
-	// pid, port and token right after it: story fakeaws-record-at-start.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A nil Stdin is /dev/null.
 	cmd.Stdout, cmd.Stderr = logFile, logFile
@@ -140,6 +140,14 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 		close(exited)
 	}()
 	f := rehearsalFakeaws{PID: cmd.Process.Pid, Port: port, Token: token, exited: exited, gone: new(atomic.Bool)}
+	if opts.started != nil {
+		if err := opts.started(f); err != nil {
+			if stopErr := f.stop(); stopErr != nil {
+				return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot be recorded: %w; %w", err, stopErr)
+			}
+			return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot be recorded: %w", err)
+		}
+	}
 
 	err = f.waitReady(ctx)
 	if err == nil {
@@ -180,7 +188,8 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 
 // stop ends fakeaws's process group: SIGTERM, then SIGKILL if any process
 // is left in it once the fallback passes. It fails, naming pid and port,
-// if the group is still there a fallback after the SIGKILL. It sends
+// if the group is still there a fallback after the SIGKILL, with
+// errRehearsalFakeawsStop. It sends
 // nothing to a group already gone (groupGone). A zero rehearsalFakeaws
 // stops nothing: kill(-0) would signal the caller's own process group.
 func (f rehearsalFakeaws) stop() error { return f.stopUntil(f.groupGone) }
@@ -200,7 +209,7 @@ func (f rehearsalFakeaws) stopUntil(stopped func() bool) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("stop failed: pid %d port %d", f.PID, f.Port)
+	return fmt.Errorf("%w: pid %d port %d", errRehearsalFakeawsStop, f.PID, f.Port)
 }
 
 // rehearsalWithin waits, at most d, for done.

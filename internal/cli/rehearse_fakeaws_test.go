@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/redscaresu/infrafactory/internal/harness"
 )
 
 // fakeawsStubEnv selects TestRehearsalFakeawsStub's role; fakeawsStubDirEnv
@@ -47,9 +49,12 @@ var fakeawsShellEnv = []string{"PWD", "SHLVL", "_"}
 // "bind-fail" fail to bind on their first or on every try; "ignore-term"
 // ignores SIGTERM; "prints-token" logs its token and exits 1;
 // "exits-after-checks" exits 3 once start's last request is answered; "zero-stop"
-// only stops a zero rehearsalFakeaws; "starter" is prepare, not fakeaws:
-// it starts the stub at the first arg after "--" and writes its pid, port
-// and token to the second, then exits 0.
+// only stops a zero rehearsalFakeaws; "late-healthy" answers /healthz 503
+// until its stub dir holds a file named healthy; "starter" is prepare, not
+// fakeaws: it starts the stub at the first arg after "--" and writes its
+// pid, port and token to the second, then exits 0; "walls" is prepare's
+// walls, with the stub at the first arg after "--" as its binary and the
+// second as the rehearsal, and exits 1 if they ever return.
 func TestRehearsalFakeawsStub(t *testing.T) {
 	role := os.Getenv(fakeawsStubEnv)
 	if role == "" {
@@ -69,6 +74,20 @@ func TestRehearsalFakeawsStub(t *testing.T) {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	}
+	if role == "walls" {
+		p := rehearsePrepare{
+			runner: harness.CommandRunnerFunc(func(context.Context, harness.Command) (harness.CommandResult, error) {
+				return harness.CommandResult{Stdout: []byte(prepareSchema)}, nil
+			}),
+			fakeawsBin:   func(context.Context, harness.CommandRunner, string) (string, error) { return flag.Arg(0), nil },
+			startFakeaws: rehearsalStartFakeawsWithStop,
+		}
+		_, err := p.walls(context.Background(), flag.Arg(1), rehearsalRecord{
+			Account: "123456789012", Region: "eu-west-1", Roots: []rehearsalRoot{{Copy: "work", Root: "work"}},
+		})
+		fmt.Fprintln(os.Stderr, "walls returned:", err)
+		os.Exit(1)
 	}
 	if role == "zero-stop" {
 		if (rehearsalFakeaws{}).stop() != nil {
@@ -119,6 +138,9 @@ func TestRehearsalFakeawsStub(t *testing.T) {
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if role == "never-healthy" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		if _, err := os.Stat(filepath.Join(os.Getenv(fakeawsStubDirEnv), "healthy")); role == "late-healthy" && err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	})
@@ -407,14 +429,43 @@ func TestRehearsalStartFakeawsRefusesAllInterfaces(t *testing.T) {
 	requireNoStubLeft(t, stubDir)
 }
 
+// Each try is passed to started, the one admitted last.
 func TestRehearsalStartFakeawsRetriesABindFailure(t *testing.T) {
 	bin, stubDir := fakeawsStub(t, "bind-fail-once")
+	opts := fakeawsStubOpts(t, bin)
+	var started []rehearsalFakeaws
+	opts.started = func(f rehearsalFakeaws) error {
+		started = append(started, f)
+		return nil
+	}
 
-	f, err := rehearsalStartFakeaws(context.Background(), fakeawsStubOpts(t, bin))
+	f, err := rehearsalStartFakeaws(context.Background(), opts)
 	require.NoError(t, err)
 	stopOnCleanup(t, f)
 	assert.Len(t, fakeawsStubPIDs(stubDir), 2, "admitted on the second try")
 	assert.Equal(t, http.StatusOK, fakeawsGet(t, f.Port, f.Token))
+	require.Len(t, started, 2)
+	last := started[1]
+	assert.Equal(t, [3]any{f.PID, f.Port, f.Token}, [3]any{last.PID, last.Port, last.Token})
+	assert.NotEqual(t, started[0].Token, last.Token)
+}
+
+// A try started cannot record is stopped and refused, never retried.
+func TestRehearsalStartFakeawsRefusesATryItCannotRecord(t *testing.T) {
+	bin, _ := fakeawsStub(t, "fakeaws")
+	opts := fakeawsStubOpts(t, bin)
+	var started []rehearsalFakeaws
+	opts.started = func(f rehearsalFakeaws) error {
+		started = append(started, f)
+		return errors.New("disk full")
+	}
+
+	f, err := rehearsalStartFakeaws(context.Background(), opts)
+	stopOnCleanup(t, f)
+	require.Error(t, err)
+	assert.Equal(t, "fakeaws cannot be recorded: disk full", err.Error())
+	require.Len(t, started, 1)
+	assert.False(t, groupAlive(started[0].PID), "the try it could not record is still alive")
 }
 
 func TestRehearsalStartFakeawsCancelledWhileWaiting(t *testing.T) {

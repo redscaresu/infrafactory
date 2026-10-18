@@ -43,8 +43,8 @@ func regatePreparedLive(t *testing.T, accept func(auth, token string) bool, args
 	t.Helper()
 	fakeaws := prepareStubFakeaws
 	fakeaws.Port = endListener(t, func(auth string) bool { return accept(auth, fakeaws.Token) })
-	p := stubWalls(rehearsePrepare{startFakeaws: func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
-		return fakeaws, func() error { return nil }, nil
+	p := stubWalls(rehearsePrepare{startFakeaws: func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+		return fakeaws, func() error { return nil }, o.started(fakeaws)
 	}})
 	return preparedBy(t, p, "", args...)
 }

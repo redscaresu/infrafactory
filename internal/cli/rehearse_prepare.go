@@ -40,6 +40,13 @@ type rehearsePrepare struct {
 	startFakeaws func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error)
 }
 
+// rehearsalStartFakeawsWithStop is rehearsalStartFakeaws with its stop, as
+// startFakeaws returns it.
+func rehearsalStartFakeawsWithStop(ctx context.Context, opts rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+	f, err := rehearsalStartFakeaws(ctx, opts)
+	return f, f.stop, err
+}
+
 // newRehearsePrepareCmd is `rehearse prepare <dir>` (ADR-0042). It reads no
 // infrafactory.yaml and sets no persistent pre-run: the group's makes a
 // missing required flag a usage error.
@@ -57,10 +64,7 @@ func newRehearsePrepareCmd(p rehearsePrepare) *cobra.Command {
 		p.fakeawsBin = rehearsalFakeawsBinary
 	}
 	if p.startFakeaws == nil {
-		p.startFakeaws = func(ctx context.Context, opts rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
-			f, err := rehearsalStartFakeaws(ctx, opts)
-			return f, f.stop, err
-		}
+		p.startFakeaws = rehearsalStartFakeawsWithStop
 	}
 	cmd := &cobra.Command{
 		Use:   "prepare <dir>",
