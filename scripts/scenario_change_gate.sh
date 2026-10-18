@@ -15,14 +15,44 @@
 #   MAX_SCENARIOS        — abort if more than N scenarios changed
 #                          (default: 10 — protects against accidental
 #                          mass-rename PRs)
+#   INFRAFACTORY_BIN     — binary to run (default: build bin/infrafactory
+#                          fresh); scenario_change_gate_test.sh points it
+#                          at a stub
+#   KILL_AFTER           — seconds between the deadline's TERM and its KILL
+#                          (default: 30)
+#   RESULTS, LOG_DIR     — the results TSV and the per-scenario log dir
 set -uo pipefail
 
 BASE_REF="${BASE_REF:-origin/main}"
 PER_SCENARIO_TIMEOUT="${PER_SCENARIO_TIMEOUT:-720}"
 MAX_SCENARIOS="${MAX_SCENARIOS:-10}"
-RESULTS=/tmp/scenario_gate_results.tsv
-LOG_DIR=/tmp/scenario_gate_logs
+RESULTS="${RESULTS:-/tmp/scenario_gate_results.tsv}"
+LOG_DIR="${LOG_DIR:-/tmp/scenario_gate_logs}"
+# A Go program ignores SIGALRM (os/signal: "caught but no action will be
+# taken"), so a `perl alarm` never ended a hung run. The deadline script
+# TERMs infrafactory alone, then KILLs it and (on Linux) whatever its
+# session still holds, since tofu runs in its own process group.
+DEADLINE="$(dirname "$0")/scenario_gate_deadline.py"
+# KILL_AFTER outlasts infrafactory's own cancel-kill fallback for tofu
+# (cancelKillFallback in internal/cli/exec_runner.go), so a run kills its
+# tofu before it is killed itself.
+KILL_AFTER="${KILL_AFTER:-30}"
 mkdir -p "$LOG_DIR"
+
+# A cancel (INT or TERM) stops the run through the watchdog, which TERMs
+# infrafactory and then KILLs what is left, so no watchdog outlives the gate.
+watchdog=
+# shellcheck disable=SC2329 # invoked by the traps below
+stop_gate() {
+  trap - INT TERM
+  if [ -n "$watchdog" ]; then
+    kill -TERM "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+  fi
+  kill -"$1" $$
+}
+trap 'stop_gate INT' INT
+trap 'stop_gate TERM' TERM
 
 # Discover changed scenarios. Diff filter AM = added + modified; we
 # don't run deleted/renamed-source scenarios because the file is gone.
@@ -49,9 +79,12 @@ echo
 
 # Build infrafactory fresh — the M93 lesson was that stale bin/infrafactory
 # can silently invalidate sweep results.
-echo "scenario-gate: building bin/infrafactory"
-go build -o bin/infrafactory ./cmd/infrafactory
-echo
+if [ -z "${INFRAFACTORY_BIN:-}" ]; then
+  echo "scenario-gate: building bin/infrafactory"
+  go build -o bin/infrafactory ./cmd/infrafactory
+  INFRAFACTORY_BIN=./bin/infrafactory
+  echo
+fi
 
 : > "$RESULTS"
 echo -e "scenario\tstatus\titers\tterminal_reason\tseconds" >> "$RESULTS"
@@ -63,16 +96,22 @@ while IFS= read -r f; do
   echo "[$(date +%H:%M:%S)] starting $name"
   start=$(date +%s)
   log="$LOG_DIR/$name.log"
-  perl -e 'alarm shift; exec @ARGV' "$PER_SCENARIO_TIMEOUT" \
-    ./bin/infrafactory run --clean "$f" > "$log" 2>&1
+  python3 "$DEADLINE" "$PER_SCENARIO_TIMEOUT" "$KILL_AFTER" \
+    "$INFRAFACTORY_BIN" run --clean "$f" > "$log" 2>&1 &
+  watchdog=$!
+  wait "$watchdog"
   rc=$?
+  watchdog=
   end=$(date +%s)
   elapsed=$((end - start))
 
   status=$(grep -E "^Status:" "$log" | tail -1 | awk -F': ' '{print $2}' || echo "no-status")
   terminal=$(grep -E "^- run/terminal_reason:" "$log" | tail -1 | sed -E 's/.*pass \((.*)\)/\1/' || echo "no-terminal")
-  iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log" || echo "0")
-  if [ "$rc" -eq 124 ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
+  iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log")
+  # The deadline script exits 124 when the deadline passed.
+  if [ "$rc" -eq 124 ]; then
+    status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"
+  fi
 
   echo -e "${name}\t${status}\t${iters}\t${terminal}\t${elapsed}" >> "$RESULTS"
   if [ "$status" = "success" ] && [ "$terminal" = "target_reached" ]; then

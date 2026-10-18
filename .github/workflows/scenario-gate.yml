@@ -55,9 +55,18 @@ jobs:
     needs: llm-credentials
     if: needs.llm-credentials.outputs.configured == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The gate script stops itself at MAX_SCENARIOS x PER_SCENARIO_TIMEOUT:
+    # 10 x 720 s = 7200 s = 120 min. The job timeout must exceed that, or a
+    # run of slow scenarios is cancelled before the script's own limits
+    # apply; the rest covers checkout, the mock clones, go build, mocks-up
+    # and the log upload. scenario_change_gate_test.sh checks the inequality.
+    timeout-minutes: 140
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      MAX_SCENARIOS: 10
+      PER_SCENARIO_TIMEOUT: 720
+      RESULTS: /tmp/scenario_gate_results.tsv
+      LOG_DIR: /tmp/scenario_gate_logs
     steps:
       - name: Checkout (full history for diff base)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -114,14 +123,24 @@ jobs:
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
         run: bash scripts/scenario_change_gate.sh
 
-      - name: Upload scenario logs on failure or cancel
+      - name: Check the scenario logs for the API key
+        # Lists the results TSV and each scenario's log by name and fails,
+        # listing nothing, if any of them contains OPENROUTER_API_KEY's value:
+        # a match against the secret, never a redaction.
+        id: logs
         if: failure() || cancelled()
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          files="$(bash scripts/scenario_gate_logs.sh)"
+          { echo 'files<<EOF'; echo "${files}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+
+      - name: Upload scenario logs on failure or cancel
+        if: always() && steps.logs.outcome == 'success' && steps.logs.outputs.files != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: scenario-gate-logs
-          path: |
-            /tmp/scenario_gate_logs/
-            /tmp/scenario_gate_results.tsv
+          path: ${{ steps.logs.outputs.files }}
 
       - name: Stop mocks
         if: always()
