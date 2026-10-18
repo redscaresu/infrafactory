@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -443,6 +444,12 @@ func guardSchemaExtraction() (check func() error, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("schema guard: %w", err)
 	}
+	// On success the returned check removes dir; on an error nothing will.
+	defer func() {
+		if err != nil {
+			os.RemoveAll(dir)
+		}
+	}()
 	if err := os.Setenv(schemaGuardEnv, dir); err != nil {
 		return nil, fmt.Errorf("schema guard: %w", err)
 	}
@@ -467,6 +474,27 @@ func guardSchemaExtraction() (check func() error, err error) {
 		}
 		return nil
 	}, nil
+}
+
+// A guard that fails after making its dir removes it: no check will.
+// A NUL in PATH makes the last Setenv fail.
+func TestGuardSchemaExtractionRemovesItsDirOnError(t *testing.T) {
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Skip("no tofu on PATH: the guard makes no dir")
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv(schemaGuardEnv, "")
+	saved := realPATH
+	realPATH = "bad\x00path"
+	t.Cleanup(func() { realPATH = saved })
+
+	_, err := guardSchemaExtraction()
+	require.ErrorIs(t, err, syscall.EINVAL, "the PATH Setenv, the guard's last step, must be what failed")
+	assert.Equal(t, tmp, filepath.Dir(os.Getenv(schemaGuardEnv)), "the guard made its dir in TMPDIR before failing")
+	entries, err := os.ReadDir(tmp)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 // countingSchemaRunner is recordedSchemaRunner, counting the schemas it
