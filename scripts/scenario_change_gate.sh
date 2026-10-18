@@ -15,13 +15,19 @@
 #   MAX_SCENARIOS        — abort if more than N scenarios changed
 #                          (default: 10 — protects against accidental
 #                          mass-rename PRs)
+#   SCENARIO_GATE_OUT_DIR — where the results TSV and logs go
+#                          (default: /tmp; the tests point it elsewhere)
 set -uo pipefail
 
 BASE_REF="${BASE_REF:-origin/main}"
 PER_SCENARIO_TIMEOUT="${PER_SCENARIO_TIMEOUT:-720}"
 MAX_SCENARIOS="${MAX_SCENARIOS:-10}"
-RESULTS=/tmp/scenario_gate_results.tsv
-LOG_DIR=/tmp/scenario_gate_logs
+OUT_DIR="${SCENARIO_GATE_OUT_DIR:-/tmp}"
+RESULTS="$OUT_DIR/scenario_gate_results.tsv"
+LOG_DIR="$OUT_DIR/scenario_gate_logs"
+# perl's `alarm` kills a scenario that outlives PER_SCENARIO_TIMEOUT with
+# SIGALRM (14); the shell reports that as 128 + 14.
+readonly SIGALRM_RC=142
 mkdir -p "$LOG_DIR"
 
 # Discover changed scenarios. Diff filter AM = added + modified; we
@@ -72,7 +78,7 @@ while IFS= read -r f; do
   status=$(grep -E "^Status:" "$log" | tail -1 | awk -F': ' '{print $2}' || echo "no-status")
   terminal=$(grep -E "^- run/terminal_reason:" "$log" | tail -1 | sed -E 's/.*pass \((.*)\)/\1/' || echo "no-terminal")
   iters=$(grep -cE "^- run/iteration_[0-9]+_generate:" "$log" || echo "0")
-  if [ "$rc" -eq 124 ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
+  if [ "$rc" -eq "$SIGALRM_RC" ]; then status="timeout"; terminal="timeout_${PER_SCENARIO_TIMEOUT}s"; fi
 
   echo -e "${name}\t${status}\t${iters}\t${terminal}\t${elapsed}" >> "$RESULTS"
   if [ "$status" = "success" ] && [ "$terminal" = "target_reached" ]; then
