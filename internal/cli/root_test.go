@@ -102,9 +102,21 @@ func ownPersistentPreRuns(group *cobra.Command) []string {
 	return paths
 }
 
+// parentCommands is each command with subcommands and its full set of
+// child names. TestEveryParentCommandIsListed fails on a parent missing here.
+var parentCommands = []struct {
+	path []string
+	want []string
+}{
+	{[]string{"mock"}, []string{"start", "stop", "status", "logs", "reset"}},
+	{[]string{"live"}, []string{"ls", "teardown", "forget", "observe", "upgrade", "candidates", "learn", "reconcile", "reap"}},
+	{[]string{"pitfalls"}, []string{"retire", "check-avoid"}},
+	{[]string{"rehearse"}, []string{"prepare", "read", "end", "state", "plan", "apply", "destroy", "import"}},
+	{[]string{"rehearse", "state"}, []string{"mv"}},
+}
+
 // The full name sets of the root and each listed parent, so a dropped command
-// and an unlisted new one under them both fail. A child under a parent the
-// table does not list passes unnoticed: add the parent as a row.
+// and an unlisted new one under them both fail.
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
 
@@ -114,16 +126,7 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 		"live", "pitfalls", "mock", "rehearse", "ui",
 	}, commandNames(root))
 
-	for _, tc := range []struct {
-		path []string
-		want []string
-	}{
-		{[]string{"mock"}, []string{"start", "stop", "status", "logs", "reset"}},
-		{[]string{"live"}, []string{"ls", "teardown", "forget", "observe", "upgrade", "candidates", "learn", "reconcile", "reap"}},
-		{[]string{"pitfalls"}, []string{"retire", "check-avoid"}},
-		{[]string{"rehearse"}, []string{"prepare", "read", "end", "state", "plan", "apply", "destroy", "import"}},
-		{[]string{"rehearse", "state"}, []string{"mv"}},
-	} {
+	for _, tc := range parentCommands {
 		name := strings.Join(tc.path, " ")
 		t.Run(name, func(t *testing.T) {
 			parent, _, err := root.Find(tc.path)
@@ -133,6 +136,33 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 			assert.ElementsMatch(t, tc.want, commandNames(parent))
 		})
 	}
+}
+
+// A new command with subcommands must get a row in parentCommands, or its
+// children go unchecked.
+func TestEveryParentCommandIsListed(t *testing.T) {
+	t.Parallel()
+
+	listed := map[string]bool{}
+	for _, tc := range parentCommands {
+		listed[strings.Join(tc.path, " ")] = true
+	}
+	root := NewRootCmd()
+	assert.Empty(t, unlistedParents(root, root.Name()+" ", listed), "add these to parentCommands")
+}
+
+func unlistedParents(cmd *cobra.Command, rootPrefix string, listed map[string]bool) []string {
+	var missing []string
+	for _, c := range cmd.Commands() {
+		if !c.HasSubCommands() {
+			continue
+		}
+		if path := strings.TrimPrefix(c.CommandPath(), rootPrefix); !listed[path] {
+			missing = append(missing, path)
+		}
+		missing = append(missing, unlistedParents(c, rootPrefix, listed)...)
+	}
+	return missing
 }
 
 func commandNames(cmd *cobra.Command) []string {
