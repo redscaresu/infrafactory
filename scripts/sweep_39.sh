@@ -17,10 +17,10 @@
 # that hits it is recorded as timed_out and the sweep moves on to the next. A run
 # that dies after its startup run.json (status "running") is recorded as crashed,
 # and one that writes no run.json at all as no_result. SWEEP_RESET_TIMEOUT
-# (seconds, default 300) bounds each `mock reset`. A reset that hits it stops
-# the sweep with exit 3, since the next scenario would run on mocks of unknown
-# state. SWEEP_KILL_GRACE (seconds, default 30) is the wait between TERM and
-# KILL for both. MOCK_LOG_ROOT
+# (seconds, default 300) bounds each `mock reset`. A reset that hits it is
+# recorded as reset_timed_out, and the sweep then stops with exit 3: the next
+# scenario would run on mocks of unknown state. SWEEP_KILL_GRACE (seconds,
+# default 30) is the wait between TERM and KILL for both. MOCK_LOG_ROOT
 # (default /private/tmp) is where the panic gate looks for mock logs.
 #
 # Discards pitfalls/<cloud>.yaml additions per
@@ -59,10 +59,10 @@ mkdir -p "$SWEEP_DIR"
 cd "$ROOT" || exit 1
 unset CLAUDECODE
 
-# The deadline script runs under python3. Without either, no run starts, and
-# the rows would have nothing to report.
+# The deadline script runs under python3. Without it, no scenario run or mock
+# reset starts, and the rows would have nothing to report.
 if ! command -v python3 >/dev/null; then
-  echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT" >&2
+  echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT and each mock reset under SWEEP_RESET_TIMEOUT" >&2
   exit 1
 fi
 if [ ! -f "$DEADLINE" ]; then
@@ -185,32 +185,53 @@ stop_sweep() {
 trap 'stop_sweep INT' INT
 trap 'stop_sweep TERM' TERM
 
-# reset_mocks: `mock reset` under SWEEP_RESET_TIMEOUT. A reset that misses its
-# deadline stops the sweep rather than running the next scenario against mocks
-# of unknown state. Other failures of the reset stay ignored, as before.
+# run_bounded <deadline> <out> <command...>: runs the command under the deadline
+# script in the background, so a TERM to the sweep reaches the stop trap at once
+# rather than after the command ends. Sets BOUNDED_EC.
+run_bounded() {
+  local deadline="$1" out="$2"
+  shift 2
+  python3 "$DEADLINE" "$deadline" "$SWEEP_KILL_GRACE" "$@" > "$out" 2>&1 &
+  watchdog=$!
+  wait "$watchdog"
+  BOUNDED_EC=$?
+  watchdog=
+}
+
+# reset_mocks: `mock reset` under SWEEP_RESET_TIMEOUT. Sets RESET_TIMED_OUT when
+# the reset misses its deadline. Other failures of the reset stay ignored, as before.
 reset_mocks() {
-  python3 "$DEADLINE" "$SWEEP_RESET_TIMEOUT" "$SWEEP_KILL_GRACE" \
-    ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1
-  local rc=$?
-  if [ "$rc" -eq "$DEADLINE_TIMED_OUT" ]; then
-    echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; stopping before the next scenario" >&2
-    restore_pitfalls
-    exit "$RESET_TIMED_OUT_EXIT"
+  RESET_TIMED_OUT=0
+  run_bounded "$SWEEP_RESET_TIMEOUT" /dev/null ./bin/infrafactory mock reset --config infrafactory.yaml
+  if [ "$BOUNDED_EC" -eq "$DEADLINE_TIMED_OUT" ]; then
+    RESET_TIMED_OUT=1
   fi
+}
+
+# stop_on_reset_timeout: ends the sweep once the blocked scenario's row is
+# written. The next scenario would run against mocks of unknown state.
+stop_on_reset_timeout() {
+  echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; stopping before the next scenario" >&2
+  restore_pitfalls
+  exit "$RESET_TIMED_OUT_EXIT"
 }
 
 run_scenario() {
   local sc="$1" name="$2" log="$3"
   reset_mocks
+  if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+    RUN_TERMINAL=reset_timed_out
+    RUN_STATUS=reset_timed_out
+    RUN_ITERS=0
+    RUN_DUR=0
+    RUN_EC=$BOUNDED_EC
+    return
+  fi
   local start
   start=$(date +%s)
   touch "$RUN_MARKER"
-  python3 "$DEADLINE" "$SWEEP_RUN_TIMEOUT" "$SWEEP_KILL_GRACE" \
-    ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1 &
-  watchdog=$!
-  wait "$watchdog"
-  RUN_EC=$?
-  watchdog=
+  run_bounded "$SWEEP_RUN_TIMEOUT" "$log" ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml
+  RUN_EC=$BOUNDED_EC
   RUN_DUR=$(( $(date +%s) - start ))
   # grep -c already prints 0 on no match; `|| echo 0` would add a second 0.
   RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null)
@@ -253,7 +274,12 @@ while IFS= read -r sc; do
     echo "  RETRY $name (transport shape: terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
     RETRY_TRANSPORT_TOTAL=$((RETRY_TRANSPORT_TOTAL + 1))
     mv "$log" "$log.attempt1"
+    first_terminal=$RUN_TERMINAL first_status=$RUN_STATUS first_iters=$RUN_ITERS first_dur=$RUN_DUR
     run_scenario "$sc" "$name" "$log"
+    if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+      # The retry never ran, so the row is the attempt that did.
+      RUN_TERMINAL=$first_terminal RUN_STATUS=$first_status RUN_ITERS=$first_iters RUN_DUR=$first_dur
+    fi
     if [ "$RUN_TERMINAL" = "target_reached" ]; then
       RETRY_RECOVERED_TOTAL=$((RETRY_RECOVERED_TOTAL + 1))
       echo "  RECOVERED $name on retry (terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
@@ -261,6 +287,9 @@ while IFS= read -r sc; do
   fi
   echo -e "$name\t${RUN_TERMINAL:-unknown}\t${RUN_STATUS:-unknown}\t$RUN_ITERS\t$RUN_DUR" >> "$SUMMARY"
   printf "%-32s %-22s %-9s iters=%-2s dur=%ss ec=%s\n" "$name" "${RUN_TERMINAL:-unknown}" "${RUN_STATUS:-unknown}" "$RUN_ITERS" "$RUN_DUR" "$RUN_EC"
+  if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+    stop_on_reset_timeout
+  fi
 done < "$SWEEP_DIR/scenarios.txt"
 
 echo
