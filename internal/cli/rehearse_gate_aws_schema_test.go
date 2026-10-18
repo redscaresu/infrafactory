@@ -23,6 +23,7 @@ import (
 // (ADR-0042 § provider "aws").
 func TestRehearsalAWSProviderTableMatchesSchema(t *testing.T) {
 	e2e.SkipUnlessEnabled(t)
+	cli.PassSchemaGuard(t)
 	t.Cleanup(e2e.CleanupAWSMirror)
 	e2e.SealNetwork(t)
 

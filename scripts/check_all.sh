@@ -12,6 +12,7 @@ fi
 echo "[2/3] doc hygiene (rules tests, then --staged)"
 bash scripts/check_doc_hygiene_test.sh
 bash scripts/ci_board_only_test.sh
+bash scripts/scenario_change_gate_test.sh
 bash scripts/check_doc_hygiene.sh --staged
 
 echo "[3/3] benchmark guard (env-gated)"

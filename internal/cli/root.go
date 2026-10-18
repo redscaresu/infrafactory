@@ -10,6 +10,7 @@ import (
 
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +24,8 @@ type rootConfig struct {
 	uiAssets fs.FS
 	deps     RuntimeDependencies
 	depsSet  bool
+	// schemaRunner is runtimeOptions.schemaRunner; nil is the real tofu.
+	schemaRunner harness.CommandRunner
 }
 
 func WithUIAssets(assets fs.FS) RootOption {
@@ -42,12 +45,24 @@ func WithRuntimeDependencies(deps RuntimeDependencies) RootOption {
 	}
 }
 
+// withSchemaRunner sets the runner that commands built with
+// rootConfig.withRuntime, generate and run among them, extract provider
+// schemas with. The ui subcommand builds its own runtimes and ignores it.
+func withSchemaRunner(runner harness.CommandRunner) RootOption {
+	return func(cfg *rootConfig) {
+		cfg.schemaRunner = runner
+	}
+}
+
 func (cfg *rootConfig) withRuntime(op string, next runtimeHandler) func(*cobra.Command, []string) error {
-	if cfg == nil || !cfg.depsSet {
+	if cfg == nil {
 		return withRuntime(op, next)
 	}
 	opts := defaultRuntimeOptions()
-	opts.deps = cfg.deps
+	if cfg.depsSet {
+		opts.deps = cfg.deps
+	}
+	opts.schemaRunner = cfg.schemaRunner
 	return withRuntimeWithOptions(op, opts, next)
 }
 

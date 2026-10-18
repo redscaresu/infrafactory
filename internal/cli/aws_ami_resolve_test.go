@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,10 +24,21 @@ import (
 )
 
 // TestMain gives every AWS dependency a test leaves nil a transport that
-// panics, so the test fails, naming itself, before a request leaves.
+// panics, so the test fails, naming itself, before a request leaves. It
+// also refuses real provider schema extraction (guardSchemaExtraction).
 func TestMain(m *testing.M) {
 	newAWSHTTPClient = func() *http.Client { return &http.Client{Transport: realAWSRefused{}} }
-	os.Exit(m.Run())
+	check, err := guardSchemaExtraction()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	if err := check(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
+	}
+	os.Exit(code)
 }
 
 const realAWSRefusedPanic = "a test reached real AWS through a nil Deps.AWSSTS, AWSSSM or AWSEC2: inject the awsLifecycle doer"

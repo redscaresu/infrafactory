@@ -18,6 +18,7 @@ import (
 	"github.com/redscaresu/infrafactory/internal/api"
 	"github.com/redscaresu/infrafactory/internal/config"
 	"github.com/redscaresu/infrafactory/internal/generator"
+	"github.com/redscaresu/infrafactory/internal/harness"
 	"github.com/redscaresu/infrafactory/internal/livestore"
 	"github.com/redscaresu/infrafactory/internal/runstore"
 	"github.com/spf13/cobra"
@@ -211,6 +212,9 @@ type uiRunStarter struct {
 	resolvedClaude string
 	preflightFunc  func() error
 	executeRunFunc func(context.Context, string, string) error
+	// schemaRunner is runtimeOptions.schemaRunner for each run; nil is the
+	// real tofu.
+	schemaRunner harness.CommandRunner
 }
 
 func (s *uiRunStarter) StartRun(ctx context.Context, req api.StartRunRequest) (string, error) {
@@ -306,6 +310,7 @@ func (s *uiRunStarter) executeRun(ctx context.Context, req api.StartRunRequest, 
 
 	opts := defaultRuntimeOptions()
 	opts.configLoader = s.configLoader()
+	opts.schemaRunner = s.schemaRunner
 
 	runtime, err := buildRuntime(runCmd, opts)
 	if err != nil {

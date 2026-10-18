@@ -152,7 +152,7 @@ resource "scaleway_block_volume" "data" {
 func (h *CommandTestHarness) Run(args ...string) CommandRunResult {
 	h.T.Helper()
 
-	root := NewRootCmd()
+	root := NewRootCmd(withSchemaRunner(recordedSchemaRunner{}))
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	root.SetOut(stdout)
