@@ -348,8 +348,9 @@ Prepare then starts the rehearsal's fakeaws, as its last step. The order is:
    that try's process starts, before its ready checks, so a prepare killed from there on leaves
    a record `rehearse end` can stop that fakeaws with once it proves itself (`/healthz` answers
    200 and it holds the token, § The walls family: `rehearse end`); one still starting, or never
-   healthy, is left unsignalled. The record is removed once a recorded try is stopped, before any
-   retry, so it never names a stopped try, whose pid can be reused. A start that returns a fakeaws
+   healthy, is left unsignalled. The record is cleared once a recorded try is stopped and reaped,
+   before any retry, since its pid can be reused; until then, `end`'s proof (`/healthz` 200 and the
+   record's token) guards it. A start that returns a fakeaws
    it never recorded is refused. A fakeaws left running with no record is named, pid and port, in
    the refusal.
 4. Write the provider override and complete the record.

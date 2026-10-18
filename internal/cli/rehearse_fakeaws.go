@@ -71,9 +71,10 @@ type rehearsalFakeawsOpts struct {
 	// and refused.
 	started func(rehearsalFakeaws) error
 	// stopped, when set, is called once a try started recorded has been
-	// stopped, before any retry, so no record names a stopped try: its pid
-	// can be reused and its port held by a server that saw its token. A
-	// failure refuses the start.
+	// stopped and reaped, before any retry, to clear its record: its pid
+	// can be reused and its port held by a server that saw its token. Until
+	// then, end's proof (/healthz 200 and the record's token) guards the
+	// record. A failure refuses the start.
 	stopped func() error
 }
 

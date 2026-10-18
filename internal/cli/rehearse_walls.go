@@ -77,20 +77,11 @@ func readRehearsalRecord(rehearsal string) (rehearsalRecord, error) {
 	return r, nil
 }
 
-// walls stands the rehearsal's walls up once the second init is done
-// (ADR-0042 § Provider override, § Start): each root's endpoints keys from
-// its locked provider's schema, then the fakeaws binary, this rehearsal's
-// fakeaws, the record, and each root's provider override. It returns the
-// fakeaws URL the overrides name. The record holds each try's pid, port
-// and token as soon as it is started, before its ready checks, and is
-// removed once that try is stopped, so it never names a stopped try. So a
-// prepare killed from there on leaves a record `end` can stop fakeaws
-// with once it proves itself (rehearsalEndProof): one still starting, or
-// never healthy, is left unsignalled. A start that returns a fakeaws it
-// never recorded is refused. The record names the roots once every
-// override is written. Any error or cancel after the
-// start stops fakeaws before prepare removes the rehearsal; a stop that
-// fails once the record is written, in the start or after it, is
+// walls stands the rehearsal's walls up once the second init is done, in
+// ADR-0042 § Start's order: endpoints keys, the fakeaws binary, fakeaws
+// recorded as each try starts and cleared once a stopped try is reaped,
+// then each root's provider override and the full record. It returns the
+// fakeaws URL. A stop that fails once the record names fakeaws is
 // errRehearsalKept.
 func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record rehearsalRecord) (fakeawsURL string, err error) {
 	for i, root := range record.Roots {
