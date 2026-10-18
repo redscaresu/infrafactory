@@ -458,7 +458,10 @@ func guardSchemaExtraction() (check func() error, err error) {
 	}
 	return func() error {
 		defer os.RemoveAll(dir)
-		dirs, _ := os.ReadFile(refused)
+		dirs, err := os.ReadFile(refused)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("schema guard: read its refusals: %w", err)
+		}
 		if len(dirs) > 0 {
 			return fmt.Errorf("schema guard: a test ran real provider schema extraction; inject recordedSchemaRunner (runtimeOptions.schemaRunner). Refused in:\n%s", dirs)
 		}

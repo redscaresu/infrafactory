@@ -192,7 +192,10 @@ validation:
 			MockState: newMockStateClient(mockwayURL),
 		},
 		runstoreRoot: filepath.Join(workspace, "runs"),
+		// Real tool: the live provider schema, not the recorded one.
+		schemaRunner: execCommandRunner{},
 	}
+	passSchemaGuard(t)
 
 	run := func(args ...string) string {
 		cmd := newRunCommandForTest(opts)
@@ -423,7 +426,10 @@ validation:
 			MockState: newMockStateClient(mockwayURL),
 		},
 		runstoreRoot: filepath.Join(workspace, "runs"),
+		// Real tool: the live provider schema, not the recorded one.
+		schemaRunner: execCommandRunner{},
 	}
+	passSchemaGuard(t)
 
 	run := func(args ...string) string {
 		cmd := newRunCommandForTest(opts)
