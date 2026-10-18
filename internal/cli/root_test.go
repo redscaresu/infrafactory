@@ -102,7 +102,9 @@ func ownPersistentPreRuns(group *cobra.Command) []string {
 	return paths
 }
 
-// The full name sets, so a dropped command and an unlisted new one both fail.
+// The full name sets of the root and each listed parent, so a dropped command
+// and an unlisted new one under them both fail. A child under a parent the
+// table does not list passes unnoticed: add the parent as a row.
 func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 	t.Parallel()
 
@@ -123,11 +125,13 @@ func TestNewRootCmdHasExpectedCommands(t *testing.T) {
 		{[]string{"rehearse", "state"}, []string{"mv"}},
 	} {
 		name := strings.Join(tc.path, " ")
-		parent, _, err := root.Find(tc.path)
-		require.NoError(t, err)
-		// Find falls back to the nearest parent without an error.
-		require.Equal(t, "infrafactory "+name, parent.CommandPath())
-		assert.ElementsMatch(t, tc.want, commandNames(parent), name)
+		t.Run(name, func(t *testing.T) {
+			parent, _, err := root.Find(tc.path)
+			require.NoError(t, err)
+			// Find falls back to the nearest parent without an error.
+			require.Equal(t, "infrafactory "+name, parent.CommandPath())
+			assert.ElementsMatch(t, tc.want, commandNames(parent))
+		})
 	}
 }
 
