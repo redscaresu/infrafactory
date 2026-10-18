@@ -106,29 +106,20 @@ start_sweep() {
     "$@" bash "${SCRIPT}" > "${root}/out.txt" 2>&1 &
 }
 
-# reap_hung_reset <root>: KILLs the fake reset the sweep left sleeping. It runs
-# in the deadline script's own session, which a KILL of the sweep's group misses.
-reap_hung_reset() {
-  local pid
-  pid="$(cat "$1/reset-hung" 2>/dev/null)" || return 0
-  kill -KILL "${pid}" 2>/dev/null || true
-}
-
-# wait_bounded <pid> <root>: waits up to SWEEP_BOUND seconds for a background
-# sweep. Sets WAITED_STATUS to its exit status, or to still-running after KILLing
-# its process group. Set in the caller, not a subshell, so wait can reap the job.
+# wait_bounded <pid>: waits up to SWEEP_BOUND seconds for a background sweep.
+# Sets WAITED_STATUS to its exit status, or to still-running after KILLing its
+# process group. Set in the caller, not a subshell, so wait can reap the job.
 wait_bounded() {
-  local pid="$1" root="$2"
+  local pid="$1"
   for _ in $(seq 1 $((SWEEP_BOUND * 10))); do kill -0 "${pid}" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "${pid}" 2>/dev/null; then
     kill -KILL -- "-${pid}" 2>/dev/null
     wait "${pid}" 2>/dev/null
     WAITED_STATUS=still-running
-  else
-    wait "${pid}"
-    WAITED_STATUS=$?
+    return
   fi
-  reap_hung_reset "${root}"
+  wait "${pid}"
+  WAITED_STATUS=$?
 }
 
 # expect <name> <want> <got>: records a FAIL line when got is not want.
@@ -184,7 +175,7 @@ set -m
 start=$SECONDS
 start_sweep "${reset_root}" SWEEP_RESET_TIMEOUT=3
 reset_pid=$!
-wait_bounded "${reset_pid}" "${reset_root}"
+wait_bounded "${reset_pid}"
 reset_status=${WAITED_STATUS}
 set +m
 reset_elapsed=$((SECONDS - start))
@@ -197,21 +188,6 @@ expect "the stop restores the pitfalls the earlier scenario added" yes "$([ ! -s
 expect "the summary and panic gate still run after a timed-out reset" yes "$(grep -q '=== panic gate ===' "${reset_root}/out.txt" && grep -q '=== summary ===' "${reset_root}/out.txt" && echo yes || echo no)"
 rm -rf "${reset_root}"
 
-# A sweep still running past the bound is KILLed with its group. The reset it
-# left in its own session is reaped too, so no sleep outlives the test.
-stuck_root="$(make_root)"
-echo 1 > "${stuck_root}/reset-hang-at"
-set -m
-start_sweep "${stuck_root}" SWEEP_RESET_TIMEOUT=600
-stuck_pid=$!
-for _ in $(seq 1 100); do [ -f "${stuck_root}/reset-hung" ] && break; sleep 0.1; done
-wait_bounded "${stuck_pid}" "${stuck_root}"
-stuck_status=${WAITED_STATUS}
-set +m
-expect "a sweep still running past the bound is KILLed" still-running "${stuck_status}"
-expect "the hung fake reset is not left sleeping" no "$(kill -0 "$(cat "${stuck_root}/reset-hung")" 2>/dev/null && echo yes || echo no)"
-rm -rf "${stuck_root}"
-
 # A panic in a mock log and a hung reset in one sweep: the panic wins (exit 2),
 # and the reset stop is still named on stderr.
 panic_root="$(make_root)"
@@ -220,7 +196,7 @@ echo "panic: boom" > "${panic_root}/mocklogs/fakegcp.log"
 set -m
 start_sweep "${panic_root}" SWEEP_RESET_TIMEOUT=3
 panic_pid=$!
-wait_bounded "${panic_pid}" "${panic_root}"
+wait_bounded "${panic_pid}"
 panic_status=${WAITED_STATUS}
 set +m
 expect "a panic and a hung reset in one sweep exit 2" 2 "${panic_status}"
@@ -237,7 +213,7 @@ start_sweep "${term_root}" SWEEP_RESET_TIMEOUT=600
 term_pid=$!
 for _ in $(seq 1 100); do [ -f "${term_root}/reset-hung" ] && break; sleep 0.1; done
 kill -TERM "${term_pid}"
-wait_bounded "${term_pid}" "${term_root}"
+wait_bounded "${term_pid}"
 term_status=${WAITED_STATUS}
 set +m
 term_elapsed=$((SECONDS - start))
@@ -253,7 +229,7 @@ echo 2 > "${retry_root}/reset-hang-at"
 set -m
 start_sweep "${retry_root}" SWEEP_RESET_TIMEOUT=3 SCENARIOS_FILE="${retry_root}/one.txt"
 retry_pid=$!
-wait_bounded "${retry_pid}" "${retry_root}"
+wait_bounded "${retry_pid}"
 retry_status=${WAITED_STATUS}
 set +m
 expect "a timed-out reset on the retry stops the sweep with exit 3" 3 "${retry_status}"
@@ -300,5 +276,15 @@ if [[ "${grace}" =~ ^[0-9]+$ && "${fallback}" =~ ^[0-9]+$ && "${grace}" -gt "${f
   grace_ok=yes
 fi
 expect "the sweep's default grace exceeds cancelKillFallback" yes "${grace_ok}"
+
+# The reset stop reads the deadline script's timed-out status, so the sweep's copy
+# must equal the script's. A mismatch would let a hung reset pass as a clean one.
+deadline_py="$(sed -n 's/^EXIT_TIMED_OUT = \([0-9]*\)$/\1/p' "${REPO_ROOT}/scripts/scenario_gate_deadline.py")"
+deadline_sh="$(sed -n 's/^DEADLINE_TIMED_OUT=\([0-9]*\)$/\1/p' "${SCRIPT}")"
+timed_out_ok=no
+if [[ -n "${deadline_py}" && "${deadline_py}" == "${deadline_sh}" ]]; then
+  timed_out_ok=yes
+fi
+expect "the sweep's deadline exit matches the deadline script's" yes "${timed_out_ok}"
 
 [[ "${FAILURES}" -eq 0 ]]

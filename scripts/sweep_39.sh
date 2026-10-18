@@ -172,9 +172,9 @@ restore_pitfalls() {
 # Ctrl-C or TERM stops the sweep. The deadline script runs in the background,
 # so the trap fires at once: it TERMs the scenario run or the mock reset in
 # progress (the deadline script KILLs its group after the grace), the pitfalls
-# are restored, and the sweep exits by the same signal. Otherwise each Ctrl-C would only end the scenario in
-# progress. Signals are ignored while restoring, so a second Ctrl-C cannot
-# skip the restore.
+# are restored, and the sweep exits by the same signal. Otherwise each Ctrl-C
+# would only end the scenario or reset in progress. Signals are ignored while
+# restoring, so a second Ctrl-C cannot skip the restore.
 watchdog=
 stop_sweep() {
   trap '' INT TERM
