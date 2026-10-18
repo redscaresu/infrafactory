@@ -1,6 +1,6 @@
 ---
 kind: code
-status: later
+status: ready
 repo: mockway
 touches: ["repository/repository.go"]
 ---
