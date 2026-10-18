@@ -16,8 +16,14 @@
 # SWEEP_RUN_TIMEOUT (seconds, default 1800) bounds each scenario's run. A run
 # that hits it is recorded as timed_out and the sweep moves on to the next. A run
 # that dies after its startup run.json (status "running") is recorded as crashed,
-# and one that writes no run.json at all as no_result. SWEEP_KILL_GRACE
-# (seconds, default 30) is the wait between TERM and KILL. MOCK_LOG_ROOT
+# and one that writes no run.json at all as no_result. SWEEP_RESET_TIMEOUT
+# (seconds, default 300) bounds each `mock reset`. A reset that hits it stops the
+# loop: the blocked scenario's row is recorded as reset_timed_out, or, on the S101
+# retry, the first attempt's row is kept. The tail then runs as usual, and the
+# sweep exits 3 at its end. If the panic gate also finds a panic, the sweep
+# exits 2 instead, since a panic is a real regression; the reset error is
+# printed either way. SWEEP_KILL_GRACE (seconds, default 30) is the wait
+# between TERM and KILL for both. MOCK_LOG_ROOT
 # (default /private/tmp) is where the panic gate looks for mock logs.
 #
 # Discards pitfalls/<cloud>.yaml additions per
@@ -32,6 +38,10 @@ ROOT="${ROOT:-$(git rev-parse --show-toplevel)}"
 SWEEP_DIR="${SWEEP_DIR:-/tmp/sweep-39}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SWEEP_RUN_TIMEOUT="${SWEEP_RUN_TIMEOUT:-1800}"
+SWEEP_RESET_TIMEOUT="${SWEEP_RESET_TIMEOUT:-300}"
+RESET_TIMED_OUT_EXIT=3
+# The deadline script exits with this when the deadline passed.
+DEADLINE_TIMED_OUT=124
 # The grace must exceed infrafactory's cancelKillFallback (internal/cli/exec_runner.go).
 # sweep_39_test.sh checks this default against that value.
 SWEEP_KILL_GRACE="${SWEEP_KILL_GRACE:-30}"
@@ -41,7 +51,7 @@ RUN_MARKER="$SWEEP_DIR/.run-started"
 
 # The deadline script takes whole seconds; anything else would fail every run
 # before it started.
-for v in SWEEP_RUN_TIMEOUT SWEEP_KILL_GRACE; do
+for v in SWEEP_RUN_TIMEOUT SWEEP_RESET_TIMEOUT SWEEP_KILL_GRACE; do
   if ! [[ "${!v}" =~ ^[1-9][0-9]*$ ]]; then
     echo "sweep: $v must be a positive whole number of seconds, got '${!v}'" >&2
     exit 1
@@ -52,10 +62,10 @@ mkdir -p "$SWEEP_DIR"
 cd "$ROOT" || exit 1
 unset CLAUDECODE
 
-# The deadline script runs under python3. Without either, no run starts, and
-# the rows would have nothing to report.
+# The deadline script runs under python3. Without it, no scenario run or mock
+# reset starts, and the rows would have nothing to report.
 if ! command -v python3 >/dev/null; then
-  echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT" >&2
+  echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT and each mock reset under SWEEP_RESET_TIMEOUT" >&2
   exit 1
 fi
 if [ ! -f "$DEADLINE" ]; then
@@ -85,6 +95,7 @@ fi
 
 RETRY_TRANSPORT_TOTAL=0
 RETRY_RECOVERED_TOTAL=0
+RESET_TIMED_OUT=0
 
 # is_transport_failed_shape — S101 heuristic for transport-class
 # failures. Returns 0 (true) if the failure matches the transport
@@ -159,11 +170,11 @@ restore_pitfalls() {
 }
 
 # Ctrl-C or TERM stops the sweep. The deadline script runs in the background,
-# so the trap fires at once: it TERMs the run (the deadline script KILLs its
-# group after the grace), the pitfalls are restored, and the sweep exits by
-# the same signal. Otherwise each Ctrl-C would only end the scenario in
-# progress. Signals are ignored while restoring, so a second Ctrl-C cannot
-# skip the restore.
+# so the trap fires at once: it TERMs the scenario run or the mock reset in
+# progress (the deadline script KILLs its group after the grace), the pitfalls
+# are restored, and the sweep exits by the same signal. Otherwise each Ctrl-C
+# would only end the scenario or reset in progress. Signals are ignored while
+# restoring, so a second Ctrl-C cannot skip the restore.
 watchdog=
 stop_sweep() {
   trap '' INT TERM
@@ -178,24 +189,52 @@ stop_sweep() {
 trap 'stop_sweep INT' INT
 trap 'stop_sweep TERM' TERM
 
+# run_bounded <deadline> <out> <command...>: runs the command under the deadline
+# script in the background, so a TERM to the sweep reaches the stop trap at once
+# rather than after the command ends. Sets BOUNDED_EC.
+run_bounded() {
+  local deadline="$1" out="$2"
+  shift 2
+  python3 "$DEADLINE" "$deadline" "$SWEEP_KILL_GRACE" "$@" > "$out" 2>&1 &
+  watchdog=$!
+  wait "$watchdog"
+  BOUNDED_EC=$?
+  watchdog=
+}
+
+# reset_mocks: `mock reset` under SWEEP_RESET_TIMEOUT. Sets RESET_TIMED_OUT when
+# the reset misses its deadline. Other failures of the reset stay ignored, as before.
+reset_mocks() {
+  RESET_TIMED_OUT=0
+  run_bounded "$SWEEP_RESET_TIMEOUT" /dev/null ./bin/infrafactory mock reset --config infrafactory.yaml
+  if [ "$BOUNDED_EC" -eq "$DEADLINE_TIMED_OUT" ]; then
+    RESET_TIMED_OUT=1
+  fi
+}
+
 run_scenario() {
   local sc="$1" name="$2" log="$3"
-  ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
+  reset_mocks
+  if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+    # No run wrote this log, so any left under the name is an earlier sweep's.
+    rm -f "$log"
+    RUN_TERMINAL=reset_timed_out
+    RUN_STATUS=reset_timed_out
+    RUN_ITERS=0
+    RUN_DUR=0
+    RUN_EC=$BOUNDED_EC
+    return
+  fi
   local start
   start=$(date +%s)
   touch "$RUN_MARKER"
-  python3 "$DEADLINE" "$SWEEP_RUN_TIMEOUT" "$SWEEP_KILL_GRACE" \
-    ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1 &
-  watchdog=$!
-  wait "$watchdog"
-  RUN_EC=$?
-  watchdog=
+  run_bounded "$SWEEP_RUN_TIMEOUT" "$log" ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml
+  RUN_EC=$BOUNDED_EC
   RUN_DUR=$(( $(date +%s) - start ))
   # grep -c already prints 0 on no match; `|| echo 0` would add a second 0.
   RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null)
   RUN_ITERS=${RUN_ITERS:-0}
-  # The deadline script exits 124 when the deadline passed.
-  if [ "$RUN_EC" -eq 124 ]; then
+  if [ "$RUN_EC" -eq "$DEADLINE_TIMED_OUT" ]; then
     RUN_TERMINAL=timed_out
     RUN_STATUS=timed_out
     return
@@ -233,7 +272,13 @@ while IFS= read -r sc; do
     echo "  RETRY $name (transport shape: terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
     RETRY_TRANSPORT_TOTAL=$((RETRY_TRANSPORT_TOTAL + 1))
     mv "$log" "$log.attempt1"
+    first_terminal=$RUN_TERMINAL first_status=$RUN_STATUS first_iters=$RUN_ITERS first_dur=$RUN_DUR first_ec=$RUN_EC
     run_scenario "$sc" "$name" "$log"
+    if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+      # The retry never ran, so the row is the attempt that did, with its own log.
+      mv "$log.attempt1" "$log"
+      RUN_TERMINAL=$first_terminal RUN_STATUS=$first_status RUN_ITERS=$first_iters RUN_DUR=$first_dur RUN_EC=$first_ec
+    fi
     if [ "$RUN_TERMINAL" = "target_reached" ]; then
       RETRY_RECOVERED_TOTAL=$((RETRY_RECOVERED_TOTAL + 1))
       echo "  RECOVERED $name on retry (terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
@@ -241,6 +286,11 @@ while IFS= read -r sc; do
   fi
   echo -e "$name\t${RUN_TERMINAL:-unknown}\t${RUN_STATUS:-unknown}\t$RUN_ITERS\t$RUN_DUR" >> "$SUMMARY"
   printf "%-32s %-22s %-9s iters=%-2s dur=%ss ec=%s\n" "$name" "${RUN_TERMINAL:-unknown}" "${RUN_STATUS:-unknown}" "$RUN_ITERS" "$RUN_DUR" "$RUN_EC"
+  # The next scenario would run against mocks of unknown state, so the loop
+  # stops here. The tail still runs, and exits 3 at its end.
+  if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+    break
+  fi
 done < "$SWEEP_DIR/scenarios.txt"
 
 echo
@@ -338,8 +388,15 @@ if [ "$avoid_total" = "0" ]; then
   echo "WARN: zero avoid-pitfall emissions this sweep. Could be (a) the LLM stopped making deletion-recoverable mistakes, or (b) the avoid extractor broke. Cross-reference next sweep before treating as a regression."
 fi
 
-# Exit non-zero if any panic surfaced — that's a real regression.
+if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+  echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; the sweep stopped before the remaining scenarios" >&2
+fi
+# Exit non-zero if any panic surfaced — that's a real regression, so it wins
+# over a reset stop.
 if [ "$panic_lines" -gt 0 ]; then
   echo "FAIL: panic-gate detected $panic_lines line(s); see $PANIC_LOG"
   exit 2
+fi
+if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+  exit "$RESET_TIMED_OUT_EXIT"
 fi
