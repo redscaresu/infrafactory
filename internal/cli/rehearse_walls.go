@@ -81,8 +81,10 @@ func readRehearsalRecord(rehearsal string) (rehearsalRecord, error) {
 // fakeaws, the record, and each root's provider override. It returns the
 // fakeaws URL the overrides name. The record holds each try's pid, port
 // and token as soon as it is started, before its ready checks, so a
-// prepare killed from there on leaves what `end` needs, and names the
-// roots once every override is written. Any error or cancel after the
+// prepare killed from there on leaves a record `end` can stop fakeaws
+// with once it proves itself (rehearsalEndProof): one still starting, or
+// never healthy, is left unsignalled. The record names the roots once
+// every override is written. Any error or cancel after the
 // start stops fakeaws before prepare removes the rehearsal; a stop that
 // fails once the record is written, in the start or after it, is
 // errRehearsalKept.

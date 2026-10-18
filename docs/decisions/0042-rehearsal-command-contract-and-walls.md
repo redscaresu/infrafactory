@@ -346,7 +346,9 @@ Prepare then starts the rehearsal's fakeaws, as its last step. The order is:
 2. Resolve the fakeaws binary (§ The fakeaws binary).
 3. Start it (§ Start), writing `rehearsal.json` with each try's pid, port and token right after
    that try's process starts, before its ready checks, so a prepare killed from there on leaves
-   something `rehearse end` can stop.
+   a record `rehearse end` can stop that fakeaws with once it proves itself (`/healthz` answers
+   200 and it holds the token, § The walls family: `rehearse end`); one still starting, or never
+   healthy, is left unsignalled.
 4. Write the provider override and complete the record.
 
 A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed; if

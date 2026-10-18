@@ -66,8 +66,9 @@ type rehearsalFakeawsOpts struct {
 	bin, dir, account, region string
 	// started, when set, is called with each try's pid, port and token
 	// right after its Start, before any check, so a starter killed during
-	// the checks leaves what stops it. A try it fails is stopped and
-	// refused.
+	// the checks leaves a record `rehearse end` can stop that try with,
+	// once it proves itself (rehearsalEndProof). A try it fails is stopped
+	// and refused.
 	started func(rehearsalFakeaws) error
 }
 

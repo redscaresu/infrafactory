@@ -450,22 +450,51 @@ func TestRehearsalStartFakeawsRetriesABindFailure(t *testing.T) {
 	assert.NotEqual(t, started[0].Token, last.Token)
 }
 
-// A try started cannot record is stopped and refused, never retried.
+// A try started cannot record is stopped and refused, never retried. When
+// that stop fails too, the refusal names both and is
+// errRehearsalFakeawsStop, which walls keeps a recorded rehearsal on.
 func TestRehearsalStartFakeawsRefusesATryItCannotRecord(t *testing.T) {
-	bin, _ := fakeawsStub(t, "fakeaws")
-	opts := fakeawsStubOpts(t, bin)
-	var started []rehearsalFakeaws
-	opts.started = func(f rehearsalFakeaws) error {
-		started = append(started, f)
-		return errors.New("disk full")
-	}
+	for _, tc := range []struct {
+		name      string
+		stopFails bool
+	}{{"the stop works", false}, {"the stop fails too", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, _ := fakeawsStub(t, "fakeaws")
+			var started []rehearsalFakeaws
+			if tc.stopFails {
+				// The group the start could not stop, once its own stop is done.
+				t.Cleanup(func() {
+					for _, f := range started {
+						_ = syscall.Kill(-f.PID, syscall.SIGKILL)
+					}
+				})
+				shortenFakeawsWaits(t, 30*time.Second)
+				// Every signal is dropped, so the group outlives the stop.
+				setForTest(t, &rehearsalKillGroup, func(pgid int, sig syscall.Signal) error {
+					if sig == 0 {
+						return syscall.Kill(-pgid, 0)
+					}
+					return nil
+				})
+			}
+			opts := fakeawsStubOpts(t, bin)
+			opts.started = func(f rehearsalFakeaws) error {
+				started = append(started, f)
+				return errors.New("disk full")
+			}
 
-	f, err := rehearsalStartFakeaws(context.Background(), opts)
-	stopOnCleanup(t, f)
-	require.Error(t, err)
-	assert.Equal(t, "fakeaws cannot be recorded: disk full", err.Error())
-	require.Len(t, started, 1)
-	assert.False(t, groupAlive(started[0].PID), "the try it could not record is still alive")
+			_, err := rehearsalStartFakeaws(context.Background(), opts)
+			require.Error(t, err)
+			require.Len(t, started, 1)
+			if !tc.stopFails {
+				assert.Equal(t, "fakeaws cannot be recorded: disk full", err.Error())
+				assert.False(t, groupAlive(started[0].PID), "the try it could not record is still alive")
+				return
+			}
+			assert.ErrorIs(t, err, errRehearsalFakeawsStop)
+			assert.Equal(t, fmt.Sprintf("fakeaws cannot be recorded: disk full; stop failed: pid %d port %d", started[0].PID, started[0].Port), err.Error())
+		})
+	}
 }
 
 func TestRehearsalStartFakeawsCancelledWhileWaiting(t *testing.T) {
