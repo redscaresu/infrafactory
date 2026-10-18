@@ -13,9 +13,9 @@ name: Release
 # after every leg succeeds, and it creates the release as a draft. It
 # publishes the draft last, once every file is attached. On a first run, a
 # failed leg or a failed upload leaves a draft or no release at all. A re-run
-# against a published release is refused before any upload: softprops keeps
-# that release's draft flag and re-uploads onto it, so a failure partway can
-# leave it missing binaries.
+# against a published release is refused before any upload, because softprops
+# would keep that release's draft flag and re-upload onto it, so a failure
+# partway could leave it missing binaries.
 #
 # A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
 # accepts only that form. So the dry run cannot replace a real release, and
@@ -30,11 +30,13 @@ on:
         description: 'Dry-run tag, v0.0.0-dryrun-<name>; the release stays a draft'
         required: true
 
+# VERSION is the tag under release. The concurrency group below repeats its
+# expression, because env is not in scope there: keep the two in step.
 env:
   VERSION: ${{ inputs.tag || github.ref_name }}
 
 # Runs on one tag queue, so the guard in the release job cannot race another
-# run's publish of the same tag.
+# run's publish of the same tag. The group repeats the VERSION expression above.
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
@@ -145,21 +147,18 @@ jobs:
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
-      # Fails closed. The tag endpoint never returns a draft: 200 means a
-      # published release, so refuse; 404 means none, so the upload runs and
-      # reuses any draft an earlier run left; any other status fails.
+      # Lists the releases and refuses if any non-draft one has this tag. Only
+      # drafts, or none, go on, so a draft from an earlier run is reused. Any
+      # gh or jq error fails the job.
       - name: Refuse to upload onto a published release
         run: |
-          err=$(mktemp)
-          if gh api "repos/${GH_REPO}/releases/tags/${VERSION}" > /dev/null 2> "${err}"; then
+          releases=$(gh api --paginate "repos/${GH_REPO}/releases") || exit 1
+          published=$(jq -s --arg tag "${VERSION}" \
+            'add // [] | map(select(.tag_name == $tag and .draft == false)) | length' <<< "${releases}") || exit 1
+          if [[ "${published}" != "0" ]]; then
             echo "release ${VERSION} is already published; not uploading to it. Delete the release and its tag to rebuild." >&2
             exit 1
           fi
-          if grep -q 'HTTP 404' "${err}"; then
-            exit 0
-          fi
-          cat "${err}" >&2
-          exit 1
 
       # Created as a draft, so no release is visible until every file is attached.
       - name: Create the draft release with every file
