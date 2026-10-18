@@ -33,6 +33,12 @@ on:
 env:
   VERSION: ${{ inputs.tag || github.ref_name }}
 
+# Runs on one tag queue, so the guard in the release job cannot race another
+# run's publish of the same tag.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -139,21 +145,21 @@ jobs:
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
-      # Fails closed: only "release not found" means there is nothing to protect.
-      # A draft left by an earlier run is reused, as before.
+      # Fails closed. The tag endpoint never returns a draft: 200 means a
+      # published release, so refuse; 404 means none, so the upload runs and
+      # reuses any draft an earlier run left; any other status fails.
       - name: Refuse to upload onto a published release
         run: |
-          if ! view=$(gh release view "${VERSION}" --json isDraft 2>&1); then
-            if [[ "${view}" == *"release not found"* ]]; then
-              exit 0
-            fi
-            echo "${view}" >&2
-            exit 1
-          fi
-          if [[ "$(jq -r .isDraft <<< "${view}")" != "true" ]]; then
+          err=$(mktemp)
+          if gh api "repos/${GH_REPO}/releases/tags/${VERSION}" > /dev/null 2> "${err}"; then
             echo "release ${VERSION} is already published; not uploading to it. Delete the release and its tag to rebuild." >&2
             exit 1
           fi
+          if grep -q 'HTTP 404' "${err}"; then
+            exit 0
+          fi
+          cat "${err}" >&2
+          exit 1
 
       # Created as a draft, so no release is visible until every file is attached.
       - name: Create the draft release with every file
