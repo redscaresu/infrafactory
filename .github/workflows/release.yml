@@ -10,12 +10,11 @@ name: Release
 # secrets, so pinning there would be churn without a threat to answer.
 #
 # The matrix only builds and uploads artifacts. The release job runs only
-# after every leg succeeds, and it creates the release as a draft. It
-# publishes the draft last, once every file is attached. On a first run, a
-# failed leg or a failed upload leaves a draft or no release at all. A re-run
-# against an already-published tag is not covered: softprops keeps that
-# release's draft flag and re-uploads onto it, so a failure partway can leave
-# it missing binaries.
+# after every leg succeeds. It refuses a tag that already has any release,
+# then creates the release with the binaries attached. On a tag push gh
+# creates the release as a draft, uploads to it and publishes it; a dry run
+# stays a draft. A draft a failed run left behind is never deleted by this
+# workflow: the refuse step names its id, and it is deleted by hand.
 #
 # A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
 # accepts only that form. So the dry run cannot replace a real release, and
@@ -41,9 +40,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      version: ${{ steps.validate.outputs.version }}
       targets: ${{ steps.targets.outputs.targets }}
     steps:
       - name: Validate the version and the dry-run tag
+        id: validate
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
@@ -57,6 +58,7 @@ jobs:
             echo "only workflow_dispatch may release a v0.0.0-dryrun-* tag, and dispatch only those: '${VERSION}'" >&2
             exit 1
           fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Set the build targets
         id: targets
@@ -116,6 +118,12 @@ jobs:
     # Waits for every matrix leg. A leg that fails or times out skips this
     # job, so no release is created.
     needs: [check, build]
+    # GitHub keeps one pending run per group and cancels an older pending run
+    # when a third arrives. So two runs on one tag queue, and the guard below
+    # cannot race another run's publish. The build matrix is not in the group.
+    concurrency:
+      group: release-${{ needs.check.outputs.version }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -139,17 +147,39 @@ jobs:
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
-      # Created as a draft, so no release is visible until every file is attached.
-      - name: Create the draft release with every file
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
-        with:
-          tag_name: ${{ env.VERSION }}
-          files: dist/*
-          fail_on_unmatched_files: true
-          draft: true
-          prerelease: ${{ contains(env.VERSION, '-') }}
-          generate_release_notes: true
+      # Refuses if the tag has any release, and deletes nothing. A published one
+      # is named as published. A draft, which a failed run may have left, has its
+      # id named so it can be deleted by hand. A release with no draft field
+      # counts as published, so the step fails closed. Each gh and jq call fails
+      # the job on error.
+      - name: Refuse when the tag already has a release
+        run: |
+          set -eo pipefail
+          releases=$(gh api --paginate "repos/${GH_REPO}/releases") \
+            || { echo "could not list the releases for ${VERSION}; nothing was changed" >&2; exit 1; }
+          matches=$(jq -s -c --arg tag "${VERSION}" 'add // [] | map(select(.tag_name == $tag))' <<< "${releases}")
+          published=$(jq '[.[] | select(.draft != true)] | length' <<< "${matches}")
+          ids=$(jq -r '[.[].id | tostring] | join(", ")' <<< "${matches}")
+          if [[ "${published}" != "0" ]]; then
+            echo "release ${VERSION} is already published (ids: ${ids}); nothing was changed." >&2
+            exit 1
+          fi
+          if [[ -n "${ids}" ]]; then
+            echo "release ${VERSION} has a draft (id: ${ids}) from an earlier run; nothing was changed. Delete that draft by hand, then re-run." >&2
+            exit 1
+          fi
 
-      - name: Publish the release
-        if: ${{ github.event_name == 'push' }}
-        run: gh release edit "${VERSION}" --draft=false
+      # gh creates the release as a draft, uploads the files, then publishes it:
+      # one release, one call. A dry run keeps it a draft. --verify-tag on a tag
+      # push checks that the tag exists; a dry run has no tag yet.
+      - name: Create the release with every file
+        run: |
+          set -eo pipefail
+          flags=(--generate-notes)
+          if [[ "${GITHUB_EVENT_NAME}" == push ]]; then
+            flags+=(--verify-tag)
+          else
+            flags+=(--draft)
+          fi
+          if [[ "${VERSION}" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "${VERSION}" dist/* "${flags[@]}"
