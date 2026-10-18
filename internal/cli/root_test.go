@@ -149,6 +149,14 @@ func TestEveryParentCommandIsListed(t *testing.T) {
 	}
 	root := NewRootCmd()
 	assert.Empty(t, unlistedParents(root, root.Name()+" ", listed), "add these to parentCommands")
+
+	// The walk must find an unlisted parent at any depth, or the check above is vacuous.
+	y := &cobra.Command{Use: "y"}
+	y.AddCommand(&cobra.Command{Use: "z"})
+	x := &cobra.Command{Use: "x"}
+	x.AddCommand(y)
+	root.AddCommand(x)
+	assert.Equal(t, []string{"x", "x y"}, unlistedParents(root, root.Name()+" ", listed))
 }
 
 func unlistedParents(cmd *cobra.Command, rootPrefix string, listed map[string]bool) []string {
