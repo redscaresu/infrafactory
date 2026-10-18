@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -489,7 +490,8 @@ func TestGuardSchemaExtractionRemovesItsDirOnError(t *testing.T) {
 	t.Cleanup(func() { realPATH = saved })
 
 	_, err := guardSchemaExtraction()
-	require.ErrorContains(t, err, "schema guard")
+	require.ErrorIs(t, err, syscall.EINVAL, "the PATH Setenv, the guard's last step, must be what failed")
+	assert.Equal(t, tmp, filepath.Dir(os.Getenv(schemaGuardEnv)), "the guard made its dir in TMPDIR before failing")
 	entries, err := os.ReadDir(tmp)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
