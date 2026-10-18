@@ -10,12 +10,10 @@ name: Release
 # secrets, so pinning there would be churn without a threat to answer.
 #
 # The matrix only builds and uploads artifacts. The release job runs only
-# after every leg succeeds, and it creates the release as a draft. It
-# publishes the draft last, once every file is attached. On a first run, a
-# failed leg or a failed upload leaves a draft or no release at all. A re-run
-# against a published release is refused before any upload, because softprops
-# would keep that release's draft flag and re-upload onto it, so a failure
-# partway could leave it missing binaries.
+# after every leg succeeds. It refuses a tag that already has a published
+# release, deletes that tag's drafts (never published, so nothing public
+# changes), creates a fresh draft, uploads the binaries to it, and publishes
+# it last. A failed run leaves at most a draft, which the next run deletes.
 #
 # A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
 # accepts only that form. So the dry run cannot replace a real release, and
@@ -148,41 +146,54 @@ jobs:
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
-      # Refuses unless the tag has no release, or exactly one draft. softprops
-      # reuses that one draft: it looks the tag up directly, then scans the two
-      # most recent pages of releases. A second same-tag release, or a published
-      # one, would let softprops pick the wrong one, so both stop here. Any gh
-      # or jq error fails the job.
-      - name: Refuse unless the tag has no release or one draft
+      # Refuses a published release for the tag, and changes nothing then. Any
+      # other release for the tag is a draft, so the tag's drafts are deleted:
+      # nothing public changes. Each gh and jq call fails the job on error.
+      - name: Refuse a published release, then delete the tag's drafts
         run: |
-          releases=$(gh api --paginate "repos/${GH_REPO}/releases") || exit 1
-          matches=$(jq -s -c --arg tag "${VERSION}" 'add // [] | map(select(.tag_name == $tag))' <<< "${releases}") || exit 1
-          count=$(jq 'length' <<< "${matches}") || exit 1
-          published=$(jq '[.[] | select(.draft == false)] | length' <<< "${matches}") || exit 1
-          if (( published > 0 || count > 1 )); then
-            ids=$(jq -r '[.[].id] | join(", ")' <<< "${matches}") || exit 1
-            echo "release ${VERSION} is published or has more than one release (ids: ${ids}); not uploading. Delete the extra releases and their tag to rebuild." >&2
+          set -eo pipefail
+          releases=$(gh api --paginate "repos/${GH_REPO}/releases") \
+            || { echo "could not list the releases for ${VERSION}; nothing was changed" >&2; exit 1; }
+          matches=$(jq -s -c --arg tag "${VERSION}" 'add // [] | map(select(.tag_name == $tag))' <<< "${releases}")
+          published=$(jq '[.[] | select(.draft == false)] | length' <<< "${matches}")
+          if [[ "${published}" != "0" ]]; then
+            echo "release ${VERSION} is already published; nothing was changed." >&2
             exit 1
           fi
+          ids=$(jq -r '.[].id' <<< "${matches}")
+          for id in ${ids}; do
+            gh api -X DELETE "repos/${GH_REPO}/releases/${id}"
+          done
 
-      # Created as a draft, so no release is visible until every file is attached.
-      - name: Create the draft release with every file
-        id: release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
-        with:
-          tag_name: ${{ env.VERSION }}
-          files: dist/*
-          fail_on_unmatched_files: true
-          draft: true
-          prerelease: ${{ contains(env.VERSION, '-') }}
-          generate_release_notes: true
+      # Created here, not by an action, so the release id is known.
+      - name: Create the draft release
+        id: create
+        run: |
+          set -eo pipefail
+          case "${VERSION}" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          id=$(gh api -X POST "repos/${GH_REPO}/releases" \
+            -f tag_name="${VERSION}" -f target_commitish="${GITHUB_SHA}" \
+            -F draft=true -F prerelease="${prerelease}" -F generate_release_notes=true \
+            --jq .id)
+          [[ "${id}" =~ ^[0-9]+$ ]] || { echo "GitHub returned no release id for ${VERSION}" >&2; exit 1; }
+          echo "id=${id}" >> "${GITHUB_OUTPUT}"
 
-      # Publishes by the id softprops returned, so it cannot publish a different
-      # release that happens to carry the same tag.
+      # Every file is attached while the release is still a draft.
+      - name: Upload the binaries to the draft
+        run: |
+          set -eo pipefail
+          gh release upload "${VERSION}" dist/*
+
+      # Publishes by the id the create step returned, so it cannot publish a
+      # different release with the same tag.
       - name: Publish the release
         if: ${{ github.event_name == 'push' }}
         env:
-          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_ID: ${{ steps.create.outputs.id }}
         run: |
-          : "${RELEASE_ID:?softprops returned no release id}"
+          set -eo pipefail
+          : "${RELEASE_ID:?the create step returned no release id}"
           gh api -X PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" -F draft=false
