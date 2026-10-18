@@ -324,6 +324,10 @@ type runtimeOptions struct {
 	// the same reason as runstoreRoot: tests must never read or write the
 	// real record of what is running in the cloud.
 	livestoreRoot string
+	// schemaRunner runs the provider schema extraction's tofu commands; nil
+	// is the real tofu. Tests inject a stub so they never download a
+	// provider.
+	schemaRunner harness.CommandRunner
 }
 
 func defaultRuntimeOptions() runtimeOptions {
@@ -424,13 +428,17 @@ func buildRuntime(cmd *cobra.Command, opts runtimeOptions) (*CommandRuntime, err
 	// back-pointer; harness factories below capture deps.MockState by
 	// value, but the router resolves the underlying client at call
 	// time via runtime.loadedScenario.Cloud.
+	schemaRunner := opts.schemaRunner
+	if schemaRunner == nil {
+		schemaRunner = execCommandRunner{}
+	}
 	runtime := &CommandRuntime{
 		ConfigPath:        configPath,
 		Config:            cfg,
 		TransportContract: transportContract,
 		Logger:            NewAppLogger(os.Stderr),
 		scenarioLoader:    opts.scenarioLoader,
-		schemaRunner:      execCommandRunner{},
+		schemaRunner:      schemaRunner,
 		runstoreRoot:      opts.runstoreRoot,
 		livestoreRoot:     opts.livestoreRoot,
 	}

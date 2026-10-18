@@ -552,7 +552,7 @@ func TestUIRunRefusesWhileHeld(t *testing.T) {
 			serverCfg.Agent.Type = generator.AgentTypeClaudeCode
 			serverCfg.Paths.Scenarios = filepath.Join(h.WorkspaceDir, "scenarios")
 			serverCfg.Validation.Layers.SandboxDeploy.Enabled = true
-			starter := &uiRunStarter{configPath: h.ConfigPath, cfg: serverCfg, hub: api.NewHub(), resolvedClaude: llm}
+			starter := &uiRunStarter{configPath: h.ConfigPath, cfg: serverCfg, hub: api.NewHub(), resolvedClaude: llm, schemaRunner: recordedSchemaRunner{}}
 			err = starter.executeRun(context.Background(),
 				api.StartRunRequest{ScenarioName: awsHoldScenario, ScenarioPath: "training/example"}, "20261012T000000Z")
 

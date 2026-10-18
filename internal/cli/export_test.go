@@ -115,3 +115,6 @@ var ExecRunner harness.CommandRunner = execCommandRunner{}
 // RehearsalAWSProviderTable is the gate's provider "aws" table, for the
 // drift test against the provider schema in cli_test.
 var RehearsalAWSProviderTable = rehearsalAWSProviderTable
+
+// PassSchemaGuard is passSchemaGuard, for cli_test's real schema extraction.
+var PassSchemaGuard = passSchemaGuard

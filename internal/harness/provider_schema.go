@@ -64,6 +64,10 @@ func ExtractProviderSchema(ctx context.Context, runner CommandRunner, env map[st
 	return ExtractProviderSchemaForCloud(ctx, runner, env, "scaleway")
 }
 
+// ProviderSchemaDirPrefix starts the name of the temp dir each schema
+// extraction runs tofu in.
+const ProviderSchemaDirPrefix = "infrafactory-schema-"
+
 // ExtractProviderSchemaForCloud is the cloud-aware entry point for
 // per-scenario provider-schema extraction. cloud is one of
 // "scaleway", "gcp", "aws"; unknown values fall back to scaleway.
@@ -74,7 +78,7 @@ func ExtractProviderSchema(ctx context.Context, runner CommandRunner, env map[st
 // behaviour (extract once at runtime construction) is no longer
 // reachable — the runtime now caches by cloud.
 func ExtractProviderSchemaForCloud(ctx context.Context, runner CommandRunner, env map[string]string, cloud string) ([]byte, error) {
-	tmpDir, err := os.MkdirTemp("", "infrafactory-schema-*")
+	tmpDir, err := os.MkdirTemp("", ProviderSchemaDirPrefix+"*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir for schema extraction: %w", err)
 	}
