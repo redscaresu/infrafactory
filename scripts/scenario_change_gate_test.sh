@@ -8,6 +8,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GATE="${REPO_ROOT}/scripts/scenario_change_gate.sh"
+DEADLINE="${REPO_ROOT}/scripts/scenario_gate_deadline.py"
 LOGS="${REPO_ROOT}/scripts/scenario_gate_logs.sh"
 WORKFLOW="${REPO_ROOT}/.github/workflows/scenario-gate.yml"
 FAILURES=0
@@ -188,14 +189,20 @@ check "no files lists nothing and passes" "0 " "$(logs_run "${KEY}" "${WORK}/abs
 
 echo "scenario-gate.yml:"
 
-got="$(python3 - "${WORKFLOW}" <<'PY'
-import sys, yaml
-job = yaml.safe_load(open(sys.argv[1]))["jobs"]["scenario-gate"]
-limit = int(job["env"]["MAX_SCENARIOS"]) * int(job["env"]["PER_SCENARIO_TIMEOUT"]) / 60
-print("ok" if job["timeout-minutes"] > limit else f"timeout-minutes {job['timeout-minutes']} <= {limit:g}")
+# A scenario's worst case is the deadline, the grace before the KILL and two
+# sweep commands; the gate's and the deadline script's values are read, not
+# restated. A value the regexes cannot find leaves got empty, which fails.
+got="$(python3 - "${WORKFLOW}" "${GATE}" "${DEADLINE}" <<'PY'
+import re, sys, yaml
+workflow, gate, deadline = (open(p).read() for p in sys.argv[1:4])
+job = yaml.safe_load(workflow)["jobs"]["scenario-gate"]
+kill_after = int(re.search(r'^KILL_AFTER="\$\{KILL_AFTER:-(\d+)\}"$', gate, re.M).group(1))
+sweep = int(re.search(r"^SWEEP_SECONDS = (\d+)$", deadline, re.M).group(1))
+worst = int(job["env"]["MAX_SCENARIOS"]) * (int(job["env"]["PER_SCENARIO_TIMEOUT"]) + kill_after + 2 * sweep) / 60
+print("ok" if job["timeout-minutes"] > worst else f"timeout-minutes {job['timeout-minutes']} <= {worst:g}")
 PY
 )"
-check "the job timeout exceeds MAX_SCENARIOS x PER_SCENARIO_TIMEOUT / 60" ok "${got}"
+check "the job timeout exceeds MAX_SCENARIOS x (PER_SCENARIO_TIMEOUT + KILL_AFTER + 2 x SWEEP_SECONDS) / 60" ok "${got}"
 
 if (( FAILURES > 0 )); then
   echo "${FAILURES} case(s) failed"

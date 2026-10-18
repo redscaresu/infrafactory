@@ -55,12 +55,16 @@ jobs:
     needs: llm-credentials
     if: needs.llm-credentials.outputs.configured == 'true'
     runs-on: ubuntu-latest
-    # The gate script stops itself at MAX_SCENARIOS x PER_SCENARIO_TIMEOUT:
-    # 10 x 720 s = 7200 s = 120 min. The job timeout must exceed that, or a
-    # run of slow scenarios is cancelled before the script's own limits
-    # apply; the rest covers checkout, the mock clones, go build, mocks-up
-    # and the log upload. scenario_change_gate_test.sh checks the inequality.
-    timeout-minutes: 140
+    # A scenario's worst case is PER_SCENARIO_TIMEOUT, then KILL_AFTER (the
+    # gate script's default) before the KILL, then up to SWEEP_SECONDS twice
+    # (scenario_gate_deadline.py) for the session sweep: 720 + 30 + 2 x 10 =
+    # 770 s, so MAX_SCENARIOS x 770 s = 7700 s, about 128 min. The job
+    # timeout must exceed that, or a run of slow scenarios is cancelled
+    # before the script's own limits apply; the rest covers checkout, the
+    # mock clones, mocks-up, the in-step go build and the log upload.
+    # scenario_change_gate_test.sh checks the inequality, reading KILL_AFTER
+    # and SWEEP_SECONDS from the scripts.
+    timeout-minutes: 150
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       MAX_SCENARIOS: 10
