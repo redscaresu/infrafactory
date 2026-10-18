@@ -329,7 +329,9 @@ func TestExecRunnerReplaceEnvGroupInterruptReachesChildOnce(t *testing.T) {
 // With no guard above it -- live teardown, Layer 2, the UI -- Run is the
 // guard: tofu still gets one SIGINT through the cancel, and the signal
 // then ends the process as it would have without Run catching it. Were
-// the process to die at once, tofu would run on with no parent.
+// the process to die at once, on Linux the kernel would SIGKILL tofu
+// mid-apply (see childSysProcAttr); elsewhere tofu would run on with no
+// parent.
 func TestExecRunnerStopsTofuBeforeAnUnguardedProcessDies(t *testing.T) {
 	t.Parallel()
 

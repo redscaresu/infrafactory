@@ -23,6 +23,10 @@ func TestExecRunnerChildDiesWithInfrafactory(t *testing.T) {
 	helper := exec.Command(os.Args[0], "-test.run=^TestExecRunnerHelperProcess$")
 	helper.Env = append(os.Environ(), execHelperEnv+"=orphan", execHelperReadyEnv+"="+ready)
 	require.NoError(t, helper.Start())
+	t.Cleanup(func() {
+		_ = helper.Process.Kill()
+		_ = helper.Wait()
+	})
 	waitForFile(t, ready)
 	raw, err := os.ReadFile(ready)
 	require.NoError(t, err)
@@ -38,7 +42,6 @@ func TestExecRunnerChildDiesWithInfrafactory(t *testing.T) {
 	require.True(t, processAlive(pid), "the sleep never started")
 
 	require.NoError(t, helper.Process.Kill())
-	_ = helper.Wait()
 
 	gone = assert.Eventually(t, func() bool { return !processAlive(pid) }, 2*time.Second, 10*time.Millisecond,
 		"the sleep outlived the process that started it")
