@@ -2,8 +2,9 @@
 # Tests for sweep_39.sh: a run that cannot finish is recorded as timed_out, a
 # run that dies after its startup write is crashed, a run that writes nothing
 # is no_result (never an older run.json), a panic in a mock log fails the
-# sweep, and Ctrl-C stops the sweep rather than the next scenario and restores
-# the pitfalls on the way out.
+# sweep, a mock reset that never returns stops the sweep with exit 3, and Ctrl-C
+# stops the sweep rather than the next scenario and restores the pitfalls on the
+# way out.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,7 +21,8 @@ SCENARIO_COUNT=4
 # make_root: a throwaway project. Its fake infrafactory never finishes a
 # hang-* scenario (it first appends a fix line to pitfalls/aws.yaml), writes a
 # running run.json and dies for broken-*, dies with nothing written for
-# silent-*, and passes every other one. Prints the path.
+# silent-*, and passes every other one. `mock reset` hangs while a reset-hangs
+# file sits in the project root. Prints the path.
 make_root() {
   local root
   root="$(mktemp -d)"
@@ -44,7 +46,10 @@ EOF
 # Fake infrafactory: `mock reset` succeeds; hang-* learns a fix and never
 # finishes; broken-* writes its startup run.json (status running) and dies;
 # silent-* dies before writing anything; anything else passes.
-if [ "$1" = mock ]; then exit 0; fi
+if [ "$1" = mock ]; then
+  [ -f reset-hangs ] && exec sleep 600
+  exit 0
+fi
 name="$(basename "$2" .yaml)"
 case "$name" in
   hang-*)
@@ -119,6 +124,31 @@ expect "sweep is not held past the bound" yes "$([ "${elapsed}" -lt "${SWEEP_BOU
 expect "summary has a header and one line per scenario" "$((SCENARIO_COUNT + 1))" "$(wc -l < "${summary}" | tr -d ' ')"
 expect "sweep exits 0 when no mock log has a panic" 0 "${rc}"
 expect "a finished sweep leaves the fix line out of pitfalls" yes "$([ ! -s "${root}/pitfalls/aws.yaml" ] && echo yes || echo no)"
+
+# A mock reset that never returns stops the sweep before any scenario runs: exit
+# 3, named on stderr, and the sweep does not wait for the reset to finish.
+reset_root="$(make_root)"
+touch "${reset_root}/reset-hangs"
+set -m
+start=$SECONDS
+run_sweep "${reset_root}" SWEEP_RESET_TIMEOUT=3 &
+reset_pid=$!
+for _ in $(seq 1 $((SWEEP_BOUND * 10))); do kill -0 "${reset_pid}" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "${reset_pid}" 2>/dev/null; then
+  kill -KILL -- "-${reset_pid}" 2>/dev/null
+  wait "${reset_pid}" 2>/dev/null
+  reset_status=still-running
+else
+  wait "${reset_pid}"
+  reset_status=$?
+fi
+set +m
+reset_elapsed=$((SECONDS - start))
+expect "a mock reset past its deadline stops the sweep with exit 3" 3 "${reset_status}"
+expect "the sweep does not wait for a hung mock reset" yes "$([ "${reset_elapsed}" -lt "${SWEEP_BOUND}" ] && echo yes || echo no)"
+expect "the stop names the mock reset" yes "$(grep -q 'mock reset did not return' "${reset_root}/out.txt" && echo yes || echo no)"
+expect "a hung mock reset starts no scenario" 1 "$(wc -l < "${reset_root}/sweep/summary.tsv" | tr -d ' ')"
+rm -rf "${reset_root}"
 
 echo "panic: boom" > "${root}/mocklogs/fakegcp.log"
 run_sweep "${root}"

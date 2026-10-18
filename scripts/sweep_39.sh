@@ -16,8 +16,11 @@
 # SWEEP_RUN_TIMEOUT (seconds, default 1800) bounds each scenario's run. A run
 # that hits it is recorded as timed_out and the sweep moves on to the next. A run
 # that dies after its startup run.json (status "running") is recorded as crashed,
-# and one that writes no run.json at all as no_result. SWEEP_KILL_GRACE
-# (seconds, default 30) is the wait between TERM and KILL. MOCK_LOG_ROOT
+# and one that writes no run.json at all as no_result. SWEEP_RESET_TIMEOUT
+# (seconds, default 300) bounds each `mock reset`. A reset that hits it stops
+# the sweep with exit 3, since the next scenario would run on mocks of unknown
+# state. SWEEP_KILL_GRACE (seconds, default 30) is the wait between TERM and
+# KILL for both. MOCK_LOG_ROOT
 # (default /private/tmp) is where the panic gate looks for mock logs.
 #
 # Discards pitfalls/<cloud>.yaml additions per
@@ -32,6 +35,10 @@ ROOT="${ROOT:-$(git rev-parse --show-toplevel)}"
 SWEEP_DIR="${SWEEP_DIR:-/tmp/sweep-39}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SWEEP_RUN_TIMEOUT="${SWEEP_RUN_TIMEOUT:-1800}"
+SWEEP_RESET_TIMEOUT="${SWEEP_RESET_TIMEOUT:-300}"
+RESET_TIMED_OUT_EXIT=3
+# The deadline script exits with this when the deadline passed.
+DEADLINE_TIMED_OUT=124
 # The grace must exceed infrafactory's cancelKillFallback (internal/cli/exec_runner.go).
 # sweep_39_test.sh checks this default against that value.
 SWEEP_KILL_GRACE="${SWEEP_KILL_GRACE:-30}"
@@ -41,7 +48,7 @@ RUN_MARKER="$SWEEP_DIR/.run-started"
 
 # The deadline script takes whole seconds; anything else would fail every run
 # before it started.
-for v in SWEEP_RUN_TIMEOUT SWEEP_KILL_GRACE; do
+for v in SWEEP_RUN_TIMEOUT SWEEP_RESET_TIMEOUT SWEEP_KILL_GRACE; do
   if ! [[ "${!v}" =~ ^[1-9][0-9]*$ ]]; then
     echo "sweep: $v must be a positive whole number of seconds, got '${!v}'" >&2
     exit 1
@@ -178,9 +185,23 @@ stop_sweep() {
 trap 'stop_sweep INT' INT
 trap 'stop_sweep TERM' TERM
 
+# reset_mocks: `mock reset` under SWEEP_RESET_TIMEOUT. A reset that misses its
+# deadline stops the sweep rather than running the next scenario against mocks
+# of unknown state. Other failures of the reset stay ignored, as before.
+reset_mocks() {
+  python3 "$DEADLINE" "$SWEEP_RESET_TIMEOUT" "$SWEEP_KILL_GRACE" \
+    ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1
+  local rc=$?
+  if [ "$rc" -eq "$DEADLINE_TIMED_OUT" ]; then
+    echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; stopping before the next scenario" >&2
+    restore_pitfalls
+    exit "$RESET_TIMED_OUT_EXIT"
+  fi
+}
+
 run_scenario() {
   local sc="$1" name="$2" log="$3"
-  ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
+  reset_mocks
   local start
   start=$(date +%s)
   touch "$RUN_MARKER"
@@ -194,8 +215,7 @@ run_scenario() {
   # grep -c already prints 0 on no match; `|| echo 0` would add a second 0.
   RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null)
   RUN_ITERS=${RUN_ITERS:-0}
-  # The deadline script exits 124 when the deadline passed.
-  if [ "$RUN_EC" -eq 124 ]; then
+  if [ "$RUN_EC" -eq "$DEADLINE_TIMED_OUT" ]; then
     RUN_TERMINAL=timed_out
     RUN_STATUS=timed_out
     return
