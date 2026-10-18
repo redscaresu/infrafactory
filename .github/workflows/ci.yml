@@ -145,6 +145,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Test the scenario gate scripts
+        run: bash scripts/scenario_change_gate_test.sh
+
       - name: Setup Node
         uses: actions/setup-node@v7.1.0
         with:
