@@ -13,9 +13,9 @@ name: Release
 # after every leg succeeds, and it creates the release as a draft. It
 # publishes the draft last, once every file is attached. On a first run, a
 # failed leg or a failed upload leaves a draft or no release at all. A re-run
-# against an already-published tag is not covered: softprops keeps that
-# release's draft flag and re-uploads onto it, so a failure partway can leave
-# it missing binaries.
+# against a published release is refused before any upload: softprops keeps
+# that release's draft flag and re-uploads onto it, so a failure partway can
+# leave it missing binaries.
 #
 # A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
 # accepts only that form. So the dry run cannot replace a real release, and
@@ -138,6 +138,22 @@ jobs:
         run: |
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
+
+      # Fails closed: only "release not found" means there is nothing to protect.
+      # A draft left by an earlier run is reused, as before.
+      - name: Refuse to upload onto a published release
+        run: |
+          if ! view=$(gh release view "${VERSION}" --json isDraft 2>&1); then
+            if [[ "${view}" == *"release not found"* ]]; then
+              exit 0
+            fi
+            echo "${view}" >&2
+            exit 1
+          fi
+          if [[ "$(jq -r .isDraft <<< "${view}")" != "true" ]]; then
+            echo "release ${VERSION} is already published; not uploading to it. Delete the release and its tag to rebuild." >&2
+            exit 1
+          fi
 
       # Created as a draft, so no release is visible until every file is attached.
       - name: Create the draft release with every file
