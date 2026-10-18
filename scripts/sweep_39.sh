@@ -13,6 +13,13 @@
 #   $SWEEP_DIR/<scenario>.log  — full run stdout/stderr
 #   $SWEEP_DIR/<cloud>.pitfalls.diff
 #
+# SWEEP_RUN_TIMEOUT (seconds, default 1800) bounds each scenario's run. A run
+# that hits it is recorded as timed_out and the sweep moves on to the next. A run
+# that dies after its startup run.json (status "running") is recorded as crashed,
+# and one that writes no run.json at all as no_result. SWEEP_KILL_GRACE
+# (seconds, default 30) is the wait between TERM and KILL. MOCK_LOG_ROOT
+# (default /private/tmp) is where the panic gate looks for mock logs.
+#
 # Discards pitfalls/<cloud>.yaml additions per
 # `feedback_sweep_protocol.md` — they're sweep noise that re-emerges
 # naturally on the next run.
@@ -23,9 +30,38 @@ set -u
 
 ROOT="${ROOT:-$(git rev-parse --show-toplevel)}"
 SWEEP_DIR="${SWEEP_DIR:-/tmp/sweep-39}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SWEEP_RUN_TIMEOUT="${SWEEP_RUN_TIMEOUT:-1800}"
+# The grace must exceed infrafactory's cancelKillFallback (internal/cli/exec_runner.go).
+# sweep_39_test.sh checks this default against that value.
+SWEEP_KILL_GRACE="${SWEEP_KILL_GRACE:-30}"
+DEADLINE="$SCRIPT_DIR/scenario_gate_deadline.py"
+MOCK_LOG_ROOT="${MOCK_LOG_ROOT:-/private/tmp}"
+RUN_MARKER="$SWEEP_DIR/.run-started"
+
+# The deadline script takes whole seconds; anything else would fail every run
+# before it started.
+for v in SWEEP_RUN_TIMEOUT SWEEP_KILL_GRACE; do
+  if ! [[ "${!v}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "sweep: $v must be a positive whole number of seconds, got '${!v}'" >&2
+    exit 1
+  fi
+done
+
 mkdir -p "$SWEEP_DIR"
 cd "$ROOT" || exit 1
 unset CLAUDECODE
+
+# The deadline script runs under python3. Without either, no run starts, and
+# the rows would have nothing to report.
+if ! command -v python3 >/dev/null; then
+  echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT" >&2
+  exit 1
+fi
+if [ ! -f "$DEADLINE" ]; then
+  echo "sweep: deadline script not found at $DEADLINE" >&2
+  exit 1
+fi
 
 if [ ! -x ./bin/infrafactory ]; then
   echo "==> bin/infrafactory not found; running make build"
@@ -90,19 +126,98 @@ is_transport_failed_shape() {
   return 0
 }
 
+# Selective pitfall restoration. The blanket `git checkout pitfalls/`
+# discarded everything — including `avoid` entries, which are grounded
+# in confirmed deletion-as-fix runs (iter N failed, iter N+1 succeeded
+# after removing a resource). Replace with a selective merge that keeps
+# only `avoid` from the post-sweep file and discards `fix` + `descriptive`
+# as sweep noise. Runs at the end of a sweep and when one is stopped.
+restore_pitfalls() {
+  echo
+  echo "=== avoid-pitfall durability ==="
+  if [ ! -x ./bin/pitfall-merge ]; then
+    echo "WARN: bin/pitfall-merge not found; falling back to blanket discard"
+    git checkout pitfalls/ 2>/dev/null || true
+    avoid_total=0
+    return
+  fi
+  avoid_total=0
+  for c in aws gcp scaleway; do
+    out=$(./bin/pitfall-merge \
+      --pre "$PRE/$c.yaml" \
+      --post "pitfalls/$c.yaml" \
+      --out "pitfalls/$c.yaml" \
+      --keep avoid,live 2>&1)
+    echo "  $c: $out"
+    # kept_avoid, not kept_new: kept_new now also counts preserved
+    # `live` entries, and folding those in would let live preservation
+    # mask an avoid-learning regression -- a ratchet that reads healthy
+    # while the thing it measures is broken.
+    added=$(echo "$out" | grep -oE 'kept_avoid=[0-9]+' | sed 's/kept_avoid=//')
+    avoid_total=$((avoid_total + ${added:-0}))
+  done
+}
+
+# Ctrl-C or TERM stops the sweep. The deadline script runs in the background,
+# so the trap fires at once: it TERMs the run (the deadline script KILLs its
+# group after the grace), the pitfalls are restored, and the sweep exits by
+# the same signal. Otherwise each Ctrl-C would only end the scenario in
+# progress. Signals are ignored while restoring, so a second Ctrl-C cannot
+# skip the restore.
+watchdog=
+stop_sweep() {
+  trap '' INT TERM
+  if [ -n "$watchdog" ]; then
+    kill -TERM "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+  fi
+  restore_pitfalls
+  trap - INT TERM
+  kill -"$1" $$
+}
+trap 'stop_sweep INT' INT
+trap 'stop_sweep TERM' TERM
+
 run_scenario() {
   local sc="$1" name="$2" log="$3"
   ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
   local start
   start=$(date +%s)
-  ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1
+  touch "$RUN_MARKER"
+  python3 "$DEADLINE" "$SWEEP_RUN_TIMEOUT" "$SWEEP_KILL_GRACE" \
+    ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1 &
+  watchdog=$!
+  wait "$watchdog"
   RUN_EC=$?
+  watchdog=
   RUN_DUR=$(( $(date +%s) - start ))
+  # grep -c already prints 0 on no match; `|| echo 0` would add a second 0.
+  RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null)
+  RUN_ITERS=${RUN_ITERS:-0}
+  # The deadline script exits 124 when the deadline passed.
+  if [ "$RUN_EC" -eq 124 ]; then
+    RUN_TERMINAL=timed_out
+    RUN_STATUS=timed_out
+    return
+  fi
+  # Only a run.json written after RUN_MARKER came from this run. With none, the
+  # run never got as far as its startup write: no_result. An older run.json
+  # would report a run that is not this one.
   local rj
-  rj=$(ls -td .infrafactory/runs/$name/*/ 2>/dev/null | head -1)run.json
+  rj=$(find ".infrafactory/runs/$name" -name run.json -newer "$RUN_MARKER" 2>/dev/null | sort | tail -1)
+  if [ -z "$rj" ]; then
+    RUN_TERMINAL=no_result
+    RUN_STATUS=no_result
+    return
+  fi
   RUN_TERMINAL=$(grep -oE '"terminal_reason":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
   RUN_STATUS=$(grep -oE '"status":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
-  RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null || echo 0)
+  # infrafactory writes status "running" at startup and the final status at
+  # exit, so a run that died partway still reads "running".
+  if [ "$RUN_STATUS" = running ]; then
+    RUN_TERMINAL=crashed
+    RUN_STATUS=crashed
+  fi
 }
 
 while IFS= read -r sc; do
@@ -205,11 +320,8 @@ echo
 echo "=== panic gate ==="
 PANIC_LOG="$SWEEP_DIR/panics.log"
 : > "$PANIC_LOG"
-for log in /private/tmp/infrafactory-mocks/fakegcp.log \
-           /private/tmp/infrafactory-mocks/fakeaws.log \
-           /private/tmp/infrafactory-mocks/mockway.log \
-           /private/tmp/infrafactory-mocks/s3router.log \
-           /private/tmp/fakegcp.log /private/tmp/fakeaws.log /private/tmp/mockway.log; do
+for log in "$MOCK_LOG_ROOT"/infrafactory-mocks/{fakegcp,fakeaws,mockway,s3router}.log \
+           "$MOCK_LOG_ROOT"/{fakegcp,fakeaws,mockway}.log; do
   [ -f "$log" ] || continue
   if grep -iE 'panic:|runtime error:|recovered from panic|nil pointer dereference' "$log" >> "$PANIC_LOG" 2>/dev/null; then
     echo "PANIC in $log:"
@@ -220,36 +332,7 @@ done
 panic_lines=$(wc -l < "$PANIC_LOG" | tr -d ' ')
 echo "PANIC_LINES=$panic_lines (summary at $PANIC_LOG)"
 
-# Selective pitfall restoration. The blanket `git checkout pitfalls/`
-# discarded everything — including `avoid` entries, which are grounded
-# in confirmed deletion-as-fix runs (iter N failed, iter N+1 succeeded
-# after removing a resource). Replace with a selective merge that keeps
-# only `avoid` from the post-sweep file and discards `fix` + `descriptive`
-# as sweep noise.
-echo
-echo "=== avoid-pitfall durability ==="
-if [ ! -x ./bin/pitfall-merge ]; then
-  echo "WARN: bin/pitfall-merge not found; falling back to blanket discard"
-  git checkout pitfalls/ 2>/dev/null || true
-  avoid_total=0
-else
-  avoid_total=0
-  for c in aws gcp scaleway; do
-    out=$(./bin/pitfall-merge \
-      --pre "$PRE/$c.yaml" \
-      --post "pitfalls/$c.yaml" \
-      --out "pitfalls/$c.yaml" \
-      --keep avoid,live 2>&1)
-    echo "  $c: $out"
-    # kept_avoid, not kept_new: kept_new now also counts preserved
-    # `live` entries, and folding those in would let live preservation
-    # mask an avoid-learning regression -- a ratchet that reads healthy
-    # while the thing it measures is broken.
-    added=$(echo "$out" | grep -oE 'kept_avoid=[0-9]+' | sed 's/kept_avoid=//')
-    avoid_total=$((avoid_total + ${added:-0}))
-  done
-fi
-
+restore_pitfalls
 echo "AVOID_EMISSIONS=$avoid_total"
 if [ "$avoid_total" = "0" ]; then
   echo "WARN: zero avoid-pitfall emissions this sweep. Could be (a) the LLM stopped making deletion-recoverable mistakes, or (b) the avoid extractor broke. Cross-reference next sweep before treating as a regression."

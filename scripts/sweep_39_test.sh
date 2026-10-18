@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Tests for sweep_39.sh: a run that cannot finish is recorded as timed_out, a
+# run that dies after its startup write is crashed, a run that writes nothing
+# is no_result (never an older run.json), a panic in a mock log fails the
+# sweep, and Ctrl-C stops the sweep rather than the next scenario and restores
+# the pitfalls on the way out.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT="${REPO_ROOT}/scripts/sweep_39.sh"
+FAILURES=0
+HUNG_RUN_DEADLINE=3
+# The hung run sleeps 600s; a sweep that waited it out would take far longer.
+SWEEP_BOUND=60
+# A stale run.json this old is never newer than the run's start marker.
+STALE_MTIME=200001010000
+# Scenarios: broken, hang, quick, silent (sorted by ls).
+SCENARIO_COUNT=4
+
+# make_root: a throwaway project. Its fake infrafactory never finishes a
+# hang-* scenario (it first appends a fix line to pitfalls/aws.yaml), writes a
+# running run.json and dies for broken-*, dies with nothing written for
+# silent-*, and passes every other one. Prints the path.
+make_root() {
+  local root
+  root="$(mktemp -d)"
+  mkdir -p "${root}/bin" "${root}/pitfalls" "${root}/scenarios/training" "${root}/mocklogs"
+  for c in aws gcp scaleway; do : > "${root}/pitfalls/${c}.yaml"; done
+  # Fake pitfall-merge: restores the pre-sweep file, discarding this sweep's additions.
+  cat > "${root}/bin/pitfall-merge" <<'EOF'
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pre) pre="$2"; shift ;;
+    --out) out="$2"; shift ;;
+  esac
+  shift
+done
+cp "$pre" "$out"
+echo kept_avoid=0
+EOF
+  cat > "${root}/bin/infrafactory" <<'EOF'
+#!/usr/bin/env bash
+# Fake infrafactory: `mock reset` succeeds; hang-* learns a fix and never
+# finishes; broken-* writes its startup run.json (status running) and dies;
+# silent-* dies before writing anything; anything else passes.
+if [ "$1" = mock ]; then exit 0; fi
+name="$(basename "$2" .yaml)"
+case "$name" in
+  hang-*)
+    echo "- source: fix" >> pitfalls/aws.yaml
+    touch "started-${name}"
+    exec sleep 600 ;;
+  broken-*)
+    mkdir -p ".infrafactory/runs/${name}/1"
+    echo '{"status":"running"}' > ".infrafactory/runs/${name}/1/run.json"
+    exit 1 ;;
+  silent-*) exit 1 ;;
+esac
+mkdir -p ".infrafactory/runs/${name}/1"
+echo '{"status":"completed","terminal_reason":"target_reached"}' > ".infrafactory/runs/${name}/1/run.json"
+EOF
+  chmod +x "${root}/bin/infrafactory" "${root}/bin/pitfall-merge"
+  for sc in broken hang quick silent; do touch "${root}/scenarios/training/${sc}-scenario.yaml"; done
+  mkdir -p "${root}/.infrafactory/runs/silent-scenario/0"
+  echo '{"status":"completed","terminal_reason":"target_reached"}' > "${root}/.infrafactory/runs/silent-scenario/0/run.json"
+  touch -t "${STALE_MTIME}" "${root}/.infrafactory/runs/silent-scenario/0/run.json"
+  echo "${root}"
+}
+
+# run_sweep <root> [sweep-env...]: runs the sweep with only the given settings,
+# so nothing the caller exported reaches it.
+run_sweep() {
+  local root="$1"
+  shift
+  env -i PATH="$PATH" ROOT="${root}" SWEEP_DIR="${root}/sweep" \
+    MOCK_LOG_ROOT="${root}/mocklogs" SWEEP_RUN_TIMEOUT="${HUNG_RUN_DEADLINE}" \
+    "$@" bash "${SCRIPT}" > "${root}/out.txt" 2>&1
+}
+
+# expect <name> <want> <got>: records a FAIL line when got is not want.
+expect() {
+  local name="$1" want="$2" got="$3"
+  if [[ "${got}" == "${want}" ]]; then
+    echo "  ok    ${name}"
+  else
+    echo "  FAIL  ${name}: expected ${want}, got ${got}"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+echo "sweep_39.sh:"
+
+bad="$(make_root)"
+run_sweep "${bad}" SWEEP_RUN_TIMEOUT=30m
+expect "a SWEEP_RUN_TIMEOUT that is not whole seconds is refused" 1 "$?"
+rm -rf "${bad}"
+
+lone="$(mktemp -d)"
+cp "${SCRIPT}" "${lone}/sweep_39.sh"
+root="$(make_root)"
+env -i PATH="$PATH" ROOT="${root}" SWEEP_DIR="${root}/lone" bash "${lone}/sweep_39.sh" > /dev/null 2>&1
+expect "a sweep without its deadline script is refused" 1 "$?"
+rm -rf "${lone}"
+
+summary="${root}/sweep/summary.tsv"
+# row <scenario> <column>: one field of that scenario's summary row.
+row() { awk -F'\t' -v n="$1" -v c="$2" '$1 == n {print $c}' "${summary}"; }
+
+start=$SECONDS
+run_sweep "${root}"
+rc=$?
+elapsed=$((SECONDS - start))
+expect "hung run is recorded as timed_out" timed_out "$(row hang-scenario 2)"
+expect "next scenario runs after the timeout" target_reached "$(row quick-scenario 2)"
+expect "a run that died after its startup write is crashed" crashed "$(row broken-scenario 2)"
+expect "a run with no run.json of its own is no_result, not an older run" no_result "$(row silent-scenario 2)"
+expect "sweep is not held past the bound" yes "$([ "${elapsed}" -lt "${SWEEP_BOUND}" ] && echo yes || echo no)"
+expect "summary has a header and one line per scenario" "$((SCENARIO_COUNT + 1))" "$(wc -l < "${summary}" | tr -d ' ')"
+expect "sweep exits 0 when no mock log has a panic" 0 "${rc}"
+expect "a finished sweep leaves the fix line out of pitfalls" yes "$([ ! -s "${root}/pitfalls/aws.yaml" ] && echo yes || echo no)"
+
+echo "panic: boom" > "${root}/mocklogs/fakegcp.log"
+run_sweep "${root}"
+expect "a panic in a mock log fails the sweep with exit 2" 2 "$?"
+rm -f "${root}/mocklogs/fakegcp.log"
+
+# Ctrl-C is sent to the sweep's whole process group, as a terminal does. Job
+# control gives the background sweep its own group and default SIGINT.
+rm -f "${root}/started-hang-scenario" "${summary}"
+set -m
+run_sweep "${root}" SWEEP_RUN_TIMEOUT=600 &
+sweep_pid=$!
+for _ in $(seq 1 100); do [ -f "${root}/started-hang-scenario" ] && break; sleep 0.1; done
+kill -INT -- "-${sweep_pid}"
+for _ in $(seq 1 300); do kill -0 "${sweep_pid}" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "${sweep_pid}" 2>/dev/null; then
+  kill -KILL -- "-${sweep_pid}" 2>/dev/null
+  wait "${sweep_pid}" 2>/dev/null
+  stopped=still-running
+else
+  wait "${sweep_pid}"
+  stopped=$?
+fi
+set +m
+expect "Ctrl-C stops the sweep with exit 130" 130 "${stopped}"
+expect "Ctrl-C does not start the next scenario" no "$(grep -q quick-scenario "${summary}" && echo yes || echo no)"
+expect "a stopped sweep leaves the fix line out of pitfalls" yes "$([ ! -s "${root}/pitfalls/aws.yaml" ] && echo yes || echo no)"
+rm -rf "${root}"
+
+# The sweep's default grace must exceed infrafactory's cancelKillFallback. A
+# value the pattern no longer finds fails the check rather than passing it.
+# shellcheck disable=SC2016 # the sed pattern matches the literal ${...} in the script
+grace="$(sed -n 's/^SWEEP_KILL_GRACE="\${SWEEP_KILL_GRACE:-\([0-9]*\)}"$/\1/p' "${SCRIPT}")"
+fallback="$(sed -n 's/^var cancelKillFallback = \([0-9]*\) \* time.Second$/\1/p' "${REPO_ROOT}/internal/cli/exec_runner.go")"
+grace_ok=no
+if [[ "${grace}" =~ ^[0-9]+$ && "${fallback}" =~ ^[0-9]+$ && "${grace}" -gt "${fallback}" ]]; then
+  grace_ok=yes
+fi
+expect "the sweep's default grace exceeds cancelKillFallback" yes "${grace_ok}"
+
+[[ "${FAILURES}" -eq 0 ]]
