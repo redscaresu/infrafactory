@@ -17,10 +17,11 @@
 # that hits it is recorded as timed_out and the sweep moves on to the next. A run
 # that dies after its startup run.json (status "running") is recorded as crashed,
 # and one that writes no run.json at all as no_result. SWEEP_RESET_TIMEOUT
-# (seconds, default 300) bounds each `mock reset`. A reset that hits it is
-# recorded as reset_timed_out, and the sweep then stops with exit 3: the next
-# scenario would run on mocks of unknown state. SWEEP_KILL_GRACE (seconds,
-# default 30) is the wait between TERM and KILL for both. MOCK_LOG_ROOT
+# (seconds, default 300) bounds each `mock reset`. A reset that hits it stops the
+# loop: the blocked scenario's row is recorded as reset_timed_out, or, on the S101
+# retry, the first attempt's row is kept. The tail then runs as usual, and the
+# sweep exits 3 at its end. SWEEP_KILL_GRACE (seconds, default 30) is the wait
+# between TERM and KILL for both. MOCK_LOG_ROOT
 # (default /private/tmp) is where the panic gate looks for mock logs.
 #
 # Discards pitfalls/<cloud>.yaml additions per
@@ -92,6 +93,7 @@ fi
 
 RETRY_TRANSPORT_TOTAL=0
 RETRY_RECOVERED_TOTAL=0
+RESET_TIMED_OUT=0
 
 # is_transport_failed_shape — S101 heuristic for transport-class
 # failures. Returns 0 (true) if the failure matches the transport
@@ -208,14 +210,6 @@ reset_mocks() {
   fi
 }
 
-# stop_on_reset_timeout: ends the sweep once the blocked scenario's row is
-# written. The next scenario would run against mocks of unknown state.
-stop_on_reset_timeout() {
-  echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; stopping before the next scenario" >&2
-  restore_pitfalls
-  exit "$RESET_TIMED_OUT_EXIT"
-}
-
 run_scenario() {
   local sc="$1" name="$2" log="$3"
   reset_mocks
@@ -274,11 +268,12 @@ while IFS= read -r sc; do
     echo "  RETRY $name (transport shape: terminal=$RUN_TERMINAL dur=${RUN_DUR}s)"
     RETRY_TRANSPORT_TOTAL=$((RETRY_TRANSPORT_TOTAL + 1))
     mv "$log" "$log.attempt1"
-    first_terminal=$RUN_TERMINAL first_status=$RUN_STATUS first_iters=$RUN_ITERS first_dur=$RUN_DUR
+    first_terminal=$RUN_TERMINAL first_status=$RUN_STATUS first_iters=$RUN_ITERS first_dur=$RUN_DUR first_ec=$RUN_EC
     run_scenario "$sc" "$name" "$log"
     if [ "$RESET_TIMED_OUT" -eq 1 ]; then
-      # The retry never ran, so the row is the attempt that did.
-      RUN_TERMINAL=$first_terminal RUN_STATUS=$first_status RUN_ITERS=$first_iters RUN_DUR=$first_dur
+      # The retry never ran, so the row is the attempt that did, with its own log.
+      mv "$log.attempt1" "$log"
+      RUN_TERMINAL=$first_terminal RUN_STATUS=$first_status RUN_ITERS=$first_iters RUN_DUR=$first_dur RUN_EC=$first_ec
     fi
     if [ "$RUN_TERMINAL" = "target_reached" ]; then
       RETRY_RECOVERED_TOTAL=$((RETRY_RECOVERED_TOTAL + 1))
@@ -287,8 +282,10 @@ while IFS= read -r sc; do
   fi
   echo -e "$name\t${RUN_TERMINAL:-unknown}\t${RUN_STATUS:-unknown}\t$RUN_ITERS\t$RUN_DUR" >> "$SUMMARY"
   printf "%-32s %-22s %-9s iters=%-2s dur=%ss ec=%s\n" "$name" "${RUN_TERMINAL:-unknown}" "${RUN_STATUS:-unknown}" "$RUN_ITERS" "$RUN_DUR" "$RUN_EC"
+  # The next scenario would run against mocks of unknown state, so the loop
+  # stops here. The tail still runs, and exits 3 at its end.
   if [ "$RESET_TIMED_OUT" -eq 1 ]; then
-    stop_on_reset_timeout
+    break
   fi
 done < "$SWEEP_DIR/scenarios.txt"
 
@@ -391,4 +388,8 @@ fi
 if [ "$panic_lines" -gt 0 ]; then
   echo "FAIL: panic-gate detected $panic_lines line(s); see $PANIC_LOG"
   exit 2
+fi
+if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+  echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; the sweep stopped before the remaining scenarios" >&2
+  exit "$RESET_TIMED_OUT_EXIT"
 fi

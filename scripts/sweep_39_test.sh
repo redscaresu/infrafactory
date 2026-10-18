@@ -44,14 +44,15 @@ echo kept_avoid=0
 EOF
   cat > "${root}/bin/infrafactory" <<'EOF'
 #!/usr/bin/env bash
-# Fake infrafactory: `mock reset` succeeds; hang-* learns a fix and never
-# finishes; broken-* writes its startup run.json (status running) and dies;
-# silent-* dies before writing anything; anything else passes.
+# Fake infrafactory: `mock reset` succeeds, or hangs on the call numbered in
+# reset-hang-at; hang-* learns a fix and never finishes; broken-* writes its
+# startup run.json (status running) and dies; silent-* dies before writing
+# anything; flaky-* fails in a transport shape; anything else passes.
 if [ "$1" = mock ]; then
   n=$(( $(cat reset-count 2>/dev/null || echo 0) + 1 ))
   echo "${n}" > reset-count
   if [ -f reset-hang-at ] && [ "$(cat reset-hang-at)" = "${n}" ]; then
-    touch reset-hung
+    echo $$ > reset-hung
     exec sleep 600
   fi
   exit 0
@@ -105,20 +106,29 @@ start_sweep() {
     "$@" bash "${SCRIPT}" > "${root}/out.txt" 2>&1 &
 }
 
-# wait_bounded <pid>: waits up to SWEEP_BOUND seconds for a background sweep.
-# Sets WAITED_STATUS to its exit status, or to still-running after KILLing its
-# process group. Set in the caller, not a subshell, so wait can reap the job.
+# reap_hung_reset <root>: KILLs the fake reset the sweep left sleeping. It runs
+# in the deadline script's own session, which a KILL of the sweep's group misses.
+reap_hung_reset() {
+  local pid
+  pid="$(cat "$1/reset-hung" 2>/dev/null)" || return 0
+  kill -KILL "${pid}" 2>/dev/null || true
+}
+
+# wait_bounded <pid> <root>: waits up to SWEEP_BOUND seconds for a background
+# sweep. Sets WAITED_STATUS to its exit status, or to still-running after KILLing
+# its process group. Set in the caller, not a subshell, so wait can reap the job.
 wait_bounded() {
-  local pid="$1"
+  local pid="$1" root="$2"
   for _ in $(seq 1 $((SWEEP_BOUND * 10))); do kill -0 "${pid}" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "${pid}" 2>/dev/null; then
     kill -KILL -- "-${pid}" 2>/dev/null
     wait "${pid}" 2>/dev/null
     WAITED_STATUS=still-running
-    return
+  else
+    wait "${pid}"
+    WAITED_STATUS=$?
   fi
-  wait "${pid}"
-  WAITED_STATUS=$?
+  reap_hung_reset "${root}"
 }
 
 # expect <name> <want> <got>: records a FAIL line when got is not want.
@@ -172,7 +182,7 @@ set -m
 start=$SECONDS
 start_sweep "${reset_root}" SWEEP_RESET_TIMEOUT=3
 reset_pid=$!
-wait_bounded "${reset_pid}"
+wait_bounded "${reset_pid}" "${reset_root}"
 reset_status=${WAITED_STATUS}
 set +m
 reset_elapsed=$((SECONDS - start))
@@ -181,7 +191,23 @@ expect "the sweep does not wait for a hung mock reset" yes "$([ "${reset_elapsed
 expect "the stop names the mock reset" yes "$(grep -q 'mock reset did not return' "${reset_root}/out.txt" && echo yes || echo no)"
 expect "the blocked scenario is recorded as reset_timed_out" reset_timed_out "$(awk -F'\t' -v n=quick-scenario '$1 == n {print $2}' "${reset_root}/sweep/summary.tsv")"
 expect "the stop restores the pitfalls the earlier scenario added" yes "$([ ! -s "${reset_root}/pitfalls/aws.yaml" ] && echo yes || echo no)"
+expect "the summary and panic gate still run after a timed-out reset" yes "$(grep -q '=== panic gate ===' "${reset_root}/out.txt" && grep -q '=== summary ===' "${reset_root}/out.txt" && echo yes || echo no)"
 rm -rf "${reset_root}"
+
+# A sweep still running past the bound is KILLed with its group. The reset it
+# left in its own session is reaped too, so no sleep outlives the test.
+stuck_root="$(make_root)"
+echo 1 > "${stuck_root}/reset-hang-at"
+set -m
+start_sweep "${stuck_root}" SWEEP_RESET_TIMEOUT=600
+stuck_pid=$!
+for _ in $(seq 1 100); do [ -f "${stuck_root}/reset-hung" ] && break; sleep 0.1; done
+wait_bounded "${stuck_pid}" "${stuck_root}"
+stuck_status=${WAITED_STATUS}
+set +m
+expect "a sweep still running past the bound is KILLed" still-running "${stuck_status}"
+expect "the hung fake reset is not left sleeping" no "$(kill -0 "$(cat "${stuck_root}/reset-hung")" 2>/dev/null && echo yes || echo no)"
+rm -rf "${stuck_root}"
 
 # TERM to the sweep during a hung reset ends it at once, through the stop trap,
 # instead of after the reset's deadline.
@@ -193,7 +219,7 @@ start_sweep "${term_root}" SWEEP_RESET_TIMEOUT=600
 term_pid=$!
 for _ in $(seq 1 100); do [ -f "${term_root}/reset-hung" ] && break; sleep 0.1; done
 kill -TERM "${term_pid}"
-wait_bounded "${term_pid}"
+wait_bounded "${term_pid}" "${term_root}"
 term_status=${WAITED_STATUS}
 set +m
 term_elapsed=$((SECONDS - start))
@@ -209,11 +235,13 @@ echo 2 > "${retry_root}/reset-hang-at"
 set -m
 start_sweep "${retry_root}" SWEEP_RESET_TIMEOUT=3 SCENARIOS_FILE="${retry_root}/one.txt"
 retry_pid=$!
-wait_bounded "${retry_pid}"
+wait_bounded "${retry_pid}" "${retry_root}"
 retry_status=${WAITED_STATUS}
 set +m
 expect "a timed-out reset on the retry stops the sweep with exit 3" 3 "${retry_status}"
-expect "the retried scenario keeps its first attempt's row" repair_budget_exhausted "$(awk -F'\t' -v n=flaky-scenario '$1 == n {print $2}' "${retry_root}/sweep/summary.tsv")"
+expect "the retried scenario keeps its first attempt's row, classified as the tail does" transport_failed "$(awk -F'\t' -v n=flaky-scenario '$1 == n {print $2}' "${retry_root}/sweep/summary.tsv")"
+expect "the retried scenario keeps its first attempt's exit code" yes "$(grep -qE '^flaky-scenario .* ec=1$' "${retry_root}/out.txt" && echo yes || echo no)"
+expect "the retried scenario keeps its own log" yes "$([ -f "${retry_root}/sweep/flaky-scenario.log" ] && echo yes || echo no)"
 rm -rf "${retry_root}"
 
 echo "panic: boom" > "${root}/mocklogs/fakegcp.log"
