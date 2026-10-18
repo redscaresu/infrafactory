@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -265,7 +266,7 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 		killFallback = time.AfterFunc(cancelKillFallback, func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
 		return nil
 	}
-	execCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	execCmd.SysProcAttr = childSysProcAttr()
 	execCmd.Dir = cmd.Dir
 	execCmd.Env = env
 
@@ -280,6 +281,11 @@ func (execCommandRunner) Run(ctx context.Context, cmd harness.Command) (harness.
 		execCmd.Stderr = cmd.Stderr
 	}
 
+	// On Linux the child dies with the thread that started it. Go ends a
+	// thread when a goroutine exits locked to it, which could be this one
+	// once Run let it go; holding it keeps it alive until the child is reaped.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	err = execCmd.Run()
 	// Run has waited for Cancel, so killFallback is safe to read here.
 	if killFallback != nil {
