@@ -344,14 +344,20 @@ Prepare then starts the rehearsal's fakeaws, as its last step. The order is:
 
 1. `tofu providers schema -json`, offline, under the second init's env.
 2. Resolve the fakeaws binary (§ The fakeaws binary).
-3. Start it (§ Start).
-4. Write `rehearsal.json` with pid, port and token at once, so a prepare killed after the start
-   leaves something `rehearse end` can stop.
-5. Write the provider override and complete the record.
+3. Start it (§ Start), writing `rehearsal.json` with each try's pid, port and token right after
+   that try's process starts, before its ready checks, so a prepare killed from there on leaves
+   a record `rehearse end` can stop that fakeaws with once it proves itself (`/healthz` answers
+   200 and it holds the token, § The walls family: `rehearse end`); one still starting, or never
+   healthy, is left unsignalled. The record is cleared once a recorded try is stopped and reaped,
+   before any retry, since its pid can be reused; until then, `end`'s proof (`/healthz` 200 and the
+   record's token) guards it. A start that returns a fakeaws
+   it never recorded is refused. A fakeaws left running with no record is named, pid and port, in
+   the refusal.
+4. Write the provider override and complete the record.
 
 A failure or cancel after the start stops fakeaws before the half-made rehearsal is removed; if
-that stop fails once `rehearsal.json` is written, the rehearsal is kept so `rehearse end` can stop
-it. There is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new
+that stop fails once `rehearsal.json` is written, in the start or after it, the rehearsal is kept
+so `rehearse end` can stop it. There is no `rehearse start`: if fakeaws dies, the override points at a closed port, and a new
 prepare is the restart.
 
 A user `backend` block is neutralised: the override replaces it, and the command-line path puts the

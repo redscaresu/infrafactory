@@ -59,7 +59,8 @@ func isSchemaCall(c harness.Command) bool {
 }
 
 // prepareStubBin and prepareStubFakeaws are what stubWalls' resolver and
-// starter answer.
+// starter answer. A stub starter that answers prepareStubFakeaws passes it
+// to the start's started first, as rehearsalStartFakeaws does.
 const prepareStubBin = "/stub/fakeaws"
 
 var prepareStubFakeaws = rehearsalFakeaws{PID: 4242, Port: 4566, Token: "stub-token"}
@@ -72,8 +73,8 @@ func stubWalls(p rehearsePrepare) rehearsePrepare {
 		p.fakeawsBin = func(context.Context, harness.CommandRunner, string) (string, error) { return prepareStubBin, nil }
 	}
 	if p.startFakeaws == nil {
-		p.startFakeaws = func(context.Context, rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
-			return prepareStubFakeaws, func() error { return nil }, nil
+		p.startFakeaws = func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
+			return prepareStubFakeaws, func() error { return nil }, o.started(prepareStubFakeaws)
 		}
 	}
 	return p

@@ -3,13 +3,17 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +40,7 @@ func TestRehearsePrepareStandsTheWallsUp(t *testing.T) {
 		},
 		startFakeaws: func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
 			events, opts = append(events, "starter"), o
-			return prepareStubFakeaws, func() error { t.Error("a prepare that succeeded stopped fakeaws"); return nil }, nil
+			return prepareStubFakeaws, func() error { t.Error("a prepare that succeeded stopped fakeaws"); return nil }, o.started(prepareStubFakeaws)
 		},
 	}
 	repo, run := initRun(t, p, prepareLock, func(_ context.Context, c harness.Command) (harness.CommandResult, error) {
@@ -56,6 +60,9 @@ func TestRehearsePrepareStandsTheWallsUp(t *testing.T) {
 	assert.Equal(t, second.Dir, schema.Dir)
 	assert.Equal(t, []string{"providers schema -json", "resolver", "starter"}, events[len(events)-3:])
 	assert.Equal(t, "/flag/fakeaws", flagPath)
+	assert.NotNil(t, opts.started)
+	assert.NotNil(t, opts.stopped)
+	opts.started, opts.stopped = nil, nil
 	assert.Equal(t, rehearsalFakeawsOpts{bin: prepareStubBin, dir: filepath.Join(rehearsal, "fakeaws"), account: "123456789012", region: "eu-west-1"}, opts)
 
 	root := filepath.Join(rehearsal, "work", "envs", "prod")
@@ -127,6 +134,7 @@ func TestRehearsePrepareStopsFakeawsAfterTheStart(t *testing.T) {
 				},
 				startFakeaws: func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
 					rehearsal := filepath.Dir(o.dir)
+					require.NoError(t, o.started(prepareStubFakeaws))
 					tc.started(t, rehearsal, cancel)
 					return prepareStubFakeaws, func() error {
 						stops++
@@ -151,25 +159,59 @@ func TestRehearsePrepareStopsFakeawsAfterTheStart(t *testing.T) {
 }
 
 // A fakeaws that cannot be stopped keeps the rehearsal, so `end` can stop
-// it, but only once the record is written: a rehearsal with no record is
-// removed as any other. The refusal names the stop failure and, in both
-// outputs, the kept rehearsal's id and record.
+// it, but only once the record is written, in the start or after it: a
+// rehearsal with no record is removed as any other. The refusal names the
+// stop failure and, in both outputs, the kept rehearsal's id and record.
+// A start refused with a failed stop is the stub's stopFailed alone: the
+// real start's wording, and that it wraps errRehearsalFakeawsStop, are
+// TestRehearsalStartFakeawsRefusesATryItCannotRecord's.
 func TestRehearsePrepareKeepsTheRehearsalWhenFakeawsWillNotStop(t *testing.T) {
 	t.Parallel()
+	stopFailed := fmt.Errorf("%w: the stub's stop", errRehearsalFakeawsStop)
 
 	for _, tc := range []struct {
 		name string
-		// started runs in the stub starter, with the rehearsal and the cancel.
-		started func(t *testing.T, rehearsal string, cancel context.CancelFunc)
-		want    string
-		kept    bool
+		// start is the stub starter's answer, given its opts, the rehearsal
+		// and the cancel; stop fails with stopFailed.
+		start func(t *testing.T, o rehearsalFakeawsOpts, rehearsal string, cancel context.CancelFunc) (rehearsalFakeaws, error)
+		want  string
+		kept  bool
 	}{
-		{"a cancel after the record", func(_ *testing.T, _ string, cancel context.CancelFunc) { cancel() },
-			"prepare is cancelled: context canceled; and fakeaws's stop failed: pid 4242 port 4566; " + errRehearsalKept.Error(), true},
-		{"the record write fails", func(t *testing.T, rehearsal string, _ context.CancelFunc) {
+		{"a cancel after the record", func(t *testing.T, o rehearsalFakeawsOpts, _ string, cancel context.CancelFunc) (rehearsalFakeaws, error) {
+			require.NoError(t, o.started(prepareStubFakeaws))
+			cancel()
+			return prepareStubFakeaws, nil
+		}, "prepare is cancelled: context canceled; and fakeaws's stop failed: the stub's stop; " + errRehearsalKept.Error(), true},
+		{"a start refused after the record", func(t *testing.T, o rehearsalFakeawsOpts, _ string, _ context.CancelFunc) (rehearsalFakeaws, error) {
+			require.NoError(t, o.started(prepareStubFakeaws))
+			return rehearsalFakeaws{}, stopFailed
+		}, "stop failed: the stub's stop; " + errRehearsalKept.Error(), true},
+		{"the record write fails", func(t *testing.T, o rehearsalFakeawsOpts, rehearsal string, _ context.CancelFunc) (rehearsalFakeaws, error) {
 			require.NoError(t, os.Chmod(rehearsal, 0o500))
 			t.Cleanup(func() { _ = os.Chmod(rehearsal, 0o700) })
-		}, "permission denied; and fakeaws's stop failed: pid 4242 port 4566", false},
+			require.Error(t, o.started(prepareStubFakeaws))
+			// So a removal can remove it.
+			require.NoError(t, os.Chmod(rehearsal, 0o700))
+			return rehearsalFakeaws{}, stopFailed
+		}, "stop failed: the stub's stop", false},
+		{"a start refused after its stopped try's record is cleared", func(t *testing.T, o rehearsalFakeawsOpts, rehearsal string, _ context.CancelFunc) (rehearsalFakeaws, error) {
+			require.NoError(t, o.started(rehearsalFakeaws{PID: 4141, Port: 4567, Token: "first-try"}))
+			require.NoError(t, o.stopped())
+			assert.NoFileExists(t, filepath.Join(rehearsal, rehearsalRecordFile), "the record still names a stopped try")
+			return rehearsalFakeaws{}, stopFailed
+		}, "stop failed: the stub's stop", false},
+		{"a start that never records", func(*testing.T, rehearsalFakeawsOpts, string, context.CancelFunc) (rehearsalFakeaws, error) {
+			return prepareStubFakeaws, nil
+		}, "fakeaws is refused: it started, but its record was never written; and fakeaws's stop failed: the stub's stop; " +
+			"fakeaws pid 4242 port 4566 is left running and no record names it: stop it by hand with kill -KILL -- -4242", false},
+		{"a retry's record write fails", func(t *testing.T, o rehearsalFakeawsOpts, rehearsal string, _ context.CancelFunc) (rehearsalFakeaws, error) {
+			require.NoError(t, o.started(rehearsalFakeaws{PID: 4141, Port: 4567, Token: "first-try"}))
+			require.NoError(t, os.Chmod(rehearsal, 0o500))
+			t.Cleanup(func() { _ = os.Chmod(rehearsal, 0o700) })
+			require.Error(t, o.started(prepareStubFakeaws))
+			require.NoError(t, os.Chmod(rehearsal, 0o700))
+			return rehearsalFakeaws{}, stopFailed
+		}, "stop failed: the stub's stop", false},
 	} {
 		for _, mode := range []OutputMode{OutputModeHuman, OutputModeJSON} {
 			t.Run(tc.name+" "+string(mode), func(t *testing.T) {
@@ -181,13 +223,8 @@ func TestRehearsePrepareKeepsTheRehearsalWhenFakeawsWillNotStop(t *testing.T) {
 						return ctx, cancel
 					},
 					startFakeaws: func(_ context.Context, o rehearsalFakeawsOpts) (rehearsalFakeaws, func() error, error) {
-						rehearsal := filepath.Dir(o.dir)
-						tc.started(t, rehearsal, cancel)
-						return prepareStubFakeaws, func() error {
-							// So a removal can remove it.
-							require.NoError(t, os.Chmod(rehearsal, 0o700))
-							return errors.New("stop failed: pid 4242 port 4566")
-						}, nil
+						f, err := tc.start(t, o, filepath.Dir(o.dir), cancel)
+						return f, func() error { return stopFailed }, err
 					},
 				}
 				repo := lockRepo(t, prepareLock, "")
@@ -337,4 +374,56 @@ func TestReadRehearsalRecordRefuses(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want, name)
 		}
 	}
+}
+
+// A prepare SIGKILLed once fakeaws is started, while its ready check
+// waits, leaves a record naming that fakeaws: `rehearse end` stops it,
+// its port refuses a dial and the rehearsal is gone.
+func TestRehearseEndStopsTheFakeawsOfAPrepareKilledBeforeReady(t *testing.T) {
+	bin, stubDir := fakeawsStub(t, "late-healthy")
+	t.Cleanup(func() {
+		for _, pid := range fakeawsStubPIDs(stubDir) {
+			if groupAlive(pid) {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+		}
+	})
+	_, repo := prepareRepo(t, nil)
+	dir := preparedDir(repo)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	prepare := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRehearsalFakeawsStub$", "--", bin, dir)
+	prepare.Env = append(os.Environ(), fakeawsStubEnv+"=walls")
+	require.NoError(t, prepare.Start())
+	waited := make(chan error, 1)
+	go func() { waited <- prepare.Wait() }()
+
+	var record rehearsalRecord
+	require.Eventually(t, func() bool {
+		var err error
+		record, err = readRehearsalRecord(dir)
+		return err == nil
+	}, 20*time.Second, 20*time.Millisecond, "prepare wrote no record while fakeaws was not ready")
+	// The record can come before the stub script logs its pid.
+	require.Eventually(t, func() bool { return slices.Equal([]int{record.PID}, fakeawsStubPIDs(stubDir)) },
+		10*time.Second, 20*time.Millisecond, "the record names another fakeaws")
+	// Up but not healthy, so prepare is inside its ready check.
+	client, healthz := rehearsalFakeawsClient(), rehearsalFakeawsURL(record.Port)+"/healthz"
+	require.Eventually(t, func() bool {
+		code, _ := rehearsalFakeawsStatus(ctx, client, healthz, "")
+		return code == http.StatusServiceUnavailable
+	}, 20*time.Second, 20*time.Millisecond, "fakeaws never answered /healthz")
+	require.NoError(t, prepare.Process.Kill())
+	<-waited
+	require.True(t, groupAlive(record.PID), "fakeaws died with prepare")
+
+	// Healthy now, so it can prove itself to end.
+	mustWriteFile(t, filepath.Join(stubDir, "healthy"), "")
+	run := runEnd(t, rehearseEnd{wd: repo}, prepareID)
+	require.NoError(t, run.err, run.stdout)
+	assert.Equal(t, "stopped", run.result.Fakeaws)
+	assert.False(t, groupAlive(record.PID), "the stub's group is still alive")
+	assertPortRefuses(t, record.Port)
+	assert.NoDirExists(t, dir)
 }
