@@ -125,7 +125,9 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           BASE_REF: origin/${{ github.event.pull_request.base.ref }}
-        run: bash scripts/scenario_change_gate.sh
+        # exec: the runner signals the step shell, not its foreground child,
+        # so the gate's INT and TERM traps only fire when the gate is that shell.
+        run: exec bash scripts/scenario_change_gate.sh
 
       - name: Check the scenario logs for the API key
         # Copies the results TSV and each scenario's log, by name, into a
