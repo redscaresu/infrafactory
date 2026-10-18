@@ -169,7 +169,9 @@ func helperCommand(role string) harness.Command {
 // "stream" writes a line to stdout and one to stderr, then exits once the
 // release file exists;
 // "tree" is "ignore" with an "ignore" grandchild sharing its stdout, as a
-// provider plugin might.
+// provider plugin might;
+// "orphan" runs a long sleep through Run and writes its pid to the ready
+// file, standing in for infrafactory about to be SIGKILLed mid-apply.
 func TestExecRunnerHelperProcess(t *testing.T) {
 	role := os.Getenv(execHelperEnv)
 	if role == "" {
@@ -210,6 +212,12 @@ func TestExecRunnerHelperProcess(t *testing.T) {
 			// The child wrote its count to this stdout, so the result holds none.
 			fmt.Printf(" buffered=%d", len(result.Stdout))
 		}
+		os.Exit(0)
+	case "orphan":
+		ready := os.Getenv(execHelperReadyEnv)
+		// exec keeps the shell's pid, so the pid written is the sleep's.
+		script := `echo $$ > "$0.tmp" && mv "$0.tmp" "$0" && exec sleep 60`
+		_, _ = execCommandRunner{}.Run(context.Background(), harness.Command{Name: "/bin/sh", Args: []string{"-c", script, ready}})
 		os.Exit(0)
 	case "unguarded":
 		// As live teardown is: nothing catches a signal.
@@ -321,7 +329,9 @@ func TestExecRunnerReplaceEnvGroupInterruptReachesChildOnce(t *testing.T) {
 // With no guard above it -- live teardown, Layer 2, the UI -- Run is the
 // guard: tofu still gets one SIGINT through the cancel, and the signal
 // then ends the process as it would have without Run catching it. Were
-// the process to die at once, tofu would run on with no parent.
+// the process to die at once, on Linux the kernel would SIGKILL tofu
+// mid-apply (see childSysProcAttr); elsewhere tofu would run on with no
+// parent.
 func TestExecRunnerStopsTofuBeforeAnUnguardedProcessDies(t *testing.T) {
 	t.Parallel()
 
