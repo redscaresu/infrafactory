@@ -30,16 +30,8 @@ on:
         description: 'Dry-run tag, v0.0.0-dryrun-<name>; the release stays a draft'
         required: true
 
-# VERSION is the tag under release. The concurrency group below repeats its
-# expression, because env is not in scope there: keep the two in step.
 env:
   VERSION: ${{ inputs.tag || github.ref_name }}
-
-# Runs on one tag queue, so the guard in the release job cannot race another
-# run's publish of the same tag. The group repeats the VERSION expression above.
-concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -49,9 +41,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      version: ${{ steps.validate.outputs.version }}
       targets: ${{ steps.targets.outputs.targets }}
     steps:
       - name: Validate the version and the dry-run tag
+        id: validate
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
@@ -65,6 +59,7 @@ jobs:
             echo "only workflow_dispatch may release a v0.0.0-dryrun-* tag, and dispatch only those: '${VERSION}'" >&2
             exit 1
           fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Set the build targets
         id: targets
@@ -124,6 +119,12 @@ jobs:
     # Waits for every matrix leg. A leg that fails or times out skips this
     # job, so no release is created.
     needs: [check, build]
+    # GitHub keeps one pending run per group and cancels an older pending run
+    # when a third arrives. So two runs on one tag queue, and the guard below
+    # cannot race another run's publish. The build matrix is not in the group.
+    concurrency:
+      group: release-${{ needs.check.outputs.version }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -147,21 +148,26 @@ jobs:
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
-      # Lists the releases and refuses if any non-draft one has this tag. Only
-      # drafts, or none, go on, so a draft from an earlier run is reused. Any
-      # gh or jq error fails the job.
-      - name: Refuse to upload onto a published release
+      # Refuses unless the tag has no release, or exactly one draft. softprops
+      # reuses that one draft: it looks the tag up directly, then scans the two
+      # most recent pages of releases. A second same-tag release, or a published
+      # one, would let softprops pick the wrong one, so both stop here. Any gh
+      # or jq error fails the job.
+      - name: Refuse unless the tag has no release or one draft
         run: |
           releases=$(gh api --paginate "repos/${GH_REPO}/releases") || exit 1
-          published=$(jq -s --arg tag "${VERSION}" \
-            'add // [] | map(select(.tag_name == $tag and .draft == false)) | length' <<< "${releases}") || exit 1
-          if [[ "${published}" != "0" ]]; then
-            echo "release ${VERSION} is already published; not uploading to it. Delete the release and its tag to rebuild." >&2
+          matches=$(jq -s -c --arg tag "${VERSION}" 'add // [] | map(select(.tag_name == $tag))' <<< "${releases}") || exit 1
+          count=$(jq 'length' <<< "${matches}") || exit 1
+          published=$(jq '[.[] | select(.draft == false)] | length' <<< "${matches}") || exit 1
+          if (( published > 0 || count > 1 )); then
+            ids=$(jq -r '[.[].id] | join(", ")' <<< "${matches}") || exit 1
+            echo "release ${VERSION} is published or has more than one release (ids: ${ids}); not uploading. Delete the extra releases and their tag to rebuild." >&2
             exit 1
           fi
 
       # Created as a draft, so no release is visible until every file is attached.
       - name: Create the draft release with every file
+        id: release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ env.VERSION }}
@@ -171,6 +177,12 @@ jobs:
           prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
 
+      # Publishes by the id softprops returned, so it cannot publish a different
+      # release that happens to carry the same tag.
       - name: Publish the release
         if: ${{ github.event_name == 'push' }}
-        run: gh release edit "${VERSION}" --draft=false
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          : "${RELEASE_ID:?softprops returned no release id}"
+          gh api -X PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" -F draft=false
