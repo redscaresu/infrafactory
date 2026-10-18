@@ -128,9 +128,12 @@ jobs:
         run: bash scripts/scenario_change_gate.sh
 
       - name: Check the scenario logs for the API key
-        # Lists the results TSV and each scenario's log by name and fails,
-        # listing nothing, if any of them contains OPENROUTER_API_KEY's value:
-        # a match against the secret, never a redaction.
+        # Copies the results TSV and each scenario's log, by name, into a
+        # fresh directory, checks the copies for OPENROUTER_API_KEY's value
+        # and lists them; fails, listing nothing, on any match. A match
+        # against the secret, never a redaction. The copies are what is
+        # uploaded: infrafactory, in its own session, can outlive a cancelled
+        # step and keep writing to the original.
         id: logs
         if: failure() || cancelled()
         env:

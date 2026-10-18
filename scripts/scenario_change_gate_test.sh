@@ -167,13 +167,20 @@ check "a converged scenario's row reads success" "success/target_reached" "$(row
 
 echo "scenario_gate_logs.sh:"
 
-# logs_run <key> <dir>: runs the lister on <dir>'s results.tsv and logs/.
-# Prints "<exit code> <stdout joined by ,>".
+# logs_run <key> <dir>: runs the lister on <dir>'s results.tsv and logs/,
+# staging under WORK. Prints "<exit code> <stdout joined by ,>"; stderr goes
+# to $WORK/logs.err.
 logs_run() {
   local out rc
-  out="$(OPENROUTER_API_KEY="$1" RESULTS="$2/results.tsv" LOG_DIR="$2/logs" bash "${LOGS}" 2> /dev/null | paste -sd, -)"
+  out="$(OPENROUTER_API_KEY="$1" RESULTS="$2/results.tsv" LOG_DIR="$2/logs" TMPDIR="${WORK}" \
+    bash "${LOGS}" 2> "${WORK}/logs.err" | paste -sd, -)"
   rc="${PIPESTATUS[0]}"
   echo "${rc} ${out}"
+}
+
+# basenames <a,b,c>: the file names of comma-separated paths.
+basenames() {
+  tr ',' '\n' <<< "$1" | xargs -n1 basename | paste -sd, -
 }
 
 KEY="stub-key-value-for-this-test"
@@ -182,13 +189,26 @@ mkdir -p "${clean}/logs"
 printf 'scenario\tstatus\n' > "${clean}/results.tsv"
 echo "a ran" > "${clean}/logs/a.log"
 echo "b ran" > "${clean}/logs/b.log"
-check "clean logs list the TSV and each log by name" \
-  "0 ${clean}/results.tsv,${clean}/logs/a.log,${clean}/logs/b.log" "$(logs_run "${KEY}" "${clean}")"
+out="$(logs_run "${KEY}" "${clean}")"
+listed="${out#* }"
+check "clean logs pass the check" 0 "${out%% *}"
+check "the list names the TSV and each log" "results.tsv,a.log,b.log" "$(basenames "${listed}")"
+stage="$(dirname "${listed%%,*}")"
+check "the list holds copies in a fresh dir, not the gate's files" ok \
+  "$([[ "${stage}" != "${clean}" && "${stage}" != "${clean}/logs" && -f "${stage}/b.log" ]] && echo ok || echo "${stage}")"
 
 seeded="${WORK}/seeded"
 cp -R "${clean}" "${seeded}"
 echo "Authorization: Bearer ${KEY} sent" >> "${seeded}/logs/b.log"
 check "a log holding the key value lists nothing and fails" "1 " "$(logs_run "${KEY}" "${seeded}")"
+check "that check read the staged copy, not the original" ok \
+  "$(grep -q 'contains the OPENROUTER_API_KEY value' "${WORK}/logs.err" && ! grep -qF "${seeded}/logs/b.log" "${WORK}/logs.err" && echo ok || echo no)"
+
+# infrafactory, in its own session, can keep writing after a cancel: the copy
+# that was checked is the one uploaded, whatever the original does later.
+echo "late line with ${KEY}" >> "${clean}/logs/b.log"
+check "a log that grows after the check leaves its copy clean" 0 "$(grep -cF "${KEY}" "${stage}/b.log")"
+
 check "an unset key lists nothing and fails" "1 " "$(logs_run "" "${clean}")"
 check "no files lists nothing and passes" "0 " "$(logs_run "${KEY}" "${WORK}/absent")"
 
