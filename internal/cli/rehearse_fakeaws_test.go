@@ -429,13 +429,21 @@ func TestRehearsalStartFakeawsRefusesAllInterfaces(t *testing.T) {
 	requireNoStubLeft(t, stubDir)
 }
 
-// Each try is passed to started, the one admitted last.
+// Each try is passed to started, the one admitted last, and the try that
+// failed to bind is passed to stopped once it is gone, before the retry
+// starts.
 func TestRehearsalStartFakeawsRetriesABindFailure(t *testing.T) {
 	bin, stubDir := fakeawsStub(t, "bind-fail-once")
 	opts := fakeawsStubOpts(t, bin)
 	var started []rehearsalFakeaws
+	var events []string
 	opts.started = func(f rehearsalFakeaws) error {
-		started = append(started, f)
+		started, events = append(started, f), append(events, "started")
+		return nil
+	}
+	opts.stopped = func() error {
+		events = append(events, "stopped")
+		assert.False(t, groupAlive(started[len(started)-1].PID), "stopped ran before the try was gone")
 		return nil
 	}
 
@@ -448,6 +456,7 @@ func TestRehearsalStartFakeawsRetriesABindFailure(t *testing.T) {
 	last := started[1]
 	assert.Equal(t, [3]any{f.PID, f.Port, f.Token}, [3]any{last.PID, last.Port, last.Token})
 	assert.NotEqual(t, started[0].Token, last.Token)
+	assert.Equal(t, []string{"started", "stopped", "started"}, events)
 }
 
 // A try started cannot record is stopped and refused, never retried. When
@@ -492,7 +501,9 @@ func TestRehearsalStartFakeawsRefusesATryItCannotRecord(t *testing.T) {
 				return
 			}
 			assert.ErrorIs(t, err, errRehearsalFakeawsStop)
-			assert.Equal(t, fmt.Sprintf("fakeaws cannot be recorded: disk full; stop failed: pid %d port %d", started[0].PID, started[0].Port), err.Error())
+			pid, port := started[0].PID, started[0].Port
+			assert.Equal(t, fmt.Sprintf("fakeaws cannot be recorded: disk full; stop failed: pid %d port %d; "+
+				"fakeaws pid %d port %d is left running and no record names it: stop it by hand with kill -KILL -- -%d", pid, port, pid, port, pid), err.Error())
 		})
 	}
 }

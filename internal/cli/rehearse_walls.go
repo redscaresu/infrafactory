@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 
 	"github.com/redscaresu/infrafactory/internal/harness"
@@ -80,11 +82,13 @@ func readRehearsalRecord(rehearsal string) (rehearsalRecord, error) {
 // its locked provider's schema, then the fakeaws binary, this rehearsal's
 // fakeaws, the record, and each root's provider override. It returns the
 // fakeaws URL the overrides name. The record holds each try's pid, port
-// and token as soon as it is started, before its ready checks, so a
+// and token as soon as it is started, before its ready checks, and is
+// removed once that try is stopped, so it never names a stopped try. So a
 // prepare killed from there on leaves a record `end` can stop fakeaws
 // with once it proves itself (rehearsalEndProof): one still starting, or
-// never healthy, is left unsignalled. The record names the roots once
-// every override is written. Any error or cancel after the
+// never healthy, is left unsignalled. A start that returns a fakeaws it
+// never recorded is refused. The record names the roots once every
+// override is written. Any error or cancel after the
 // start stops fakeaws before prepare removes the rehearsal; a stop that
 // fails once the record is written, in the start or after it, is
 // errRehearsalKept.
@@ -120,7 +124,15 @@ func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record reh
 		recorded = true
 		return nil
 	}
-	fakeaws, stop, err := p.startFakeaws(ctx, rehearsalFakeawsOpts{bin: bin, dir: filepath.Join(rehearsal, "fakeaws"), account: record.Account, region: record.Region, started: started})
+	stopped := func() error {
+		recorded = false
+		if err := os.Remove(filepath.Join(rehearsal, rehearsalRecordFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	opts := rehearsalFakeawsOpts{bin: bin, dir: filepath.Join(rehearsal, "fakeaws"), account: record.Account, region: record.Region, started: started, stopped: stopped}
+	fakeaws, stop, err := p.startFakeaws(ctx, opts)
 	if err != nil {
 		if recorded && errors.Is(err, errRehearsalFakeawsStop) {
 			err = fmt.Errorf("%w; %w", err, errRehearsalKept)
@@ -136,9 +148,12 @@ func (p rehearsePrepare) walls(ctx context.Context, rehearsal string, record reh
 		case stopErr != nil && recorded:
 			err = fmt.Errorf("%w; and fakeaws's %w; %w", err, stopErr, errRehearsalKept)
 		case stopErr != nil:
-			err = fmt.Errorf("%w; and fakeaws's %w", err, stopErr)
+			err = fmt.Errorf("%w; and fakeaws's %w; %s", err, stopErr, fakeaws.orphaned())
 		}
 	}()
+	if !recorded {
+		return "", errors.New("fakeaws is refused: it started, but its record was never written")
+	}
 	record.PID, record.Port, record.Token = fakeaws.PID, fakeaws.Port, fakeaws.Token
 	fakeawsURL = rehearsalFakeawsURL(record.Port)
 	for _, root := range record.Roots {

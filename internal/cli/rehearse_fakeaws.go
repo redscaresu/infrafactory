@@ -70,6 +70,11 @@ type rehearsalFakeawsOpts struct {
 	// once it proves itself (rehearsalEndProof). A try it fails is stopped
 	// and refused.
 	started func(rehearsalFakeaws) error
+	// stopped, when set, is called once a try started recorded has been
+	// stopped, before any retry, so no record names a stopped try: its pid
+	// can be reused and its port held by a server that saw its token. A
+	// failure refuses the start.
+	stopped func() error
 }
 
 // rehearsalFakeaws is a started fakeaws: its pid, which is also its
@@ -144,7 +149,7 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 	if opts.started != nil {
 		if err := opts.started(f); err != nil {
 			if stopErr := f.stop(); stopErr != nil {
-				return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot be recorded: %w; %w", err, stopErr)
+				return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot be recorded: %w; %w; %s", err, stopErr, f.orphaned())
 			}
 			return rehearsalFakeaws{}, fmt.Errorf("fakeaws cannot be recorded: %w", err)
 		}
@@ -173,6 +178,11 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 		}
 	}
 	stopErr := f.stop()
+	if stopErr == nil && opts.stopped != nil {
+		if clearErr := opts.stopped(); clearErr != nil {
+			return rehearsalFakeaws{}, fmt.Errorf("%w; and the stopped fakeaws's record cannot be cleared: %w", err, clearErr)
+		}
+	}
 	tail := rehearsalFakeawsLogTail(logPath, token)
 	switch {
 	case stopErr != nil:
@@ -185,6 +195,12 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 		return rehearsalFakeaws{}, fmt.Errorf("%w (%s); fakeaws.log ends:\n%s", errRehearsalFakeawsExited, cmd.ProcessState, tail)
 	}
 	return rehearsalFakeaws{}, fmt.Errorf("%w; fakeaws.log ends:\n%s", err, tail)
+}
+
+// orphaned is a refusal's note for a fakeaws that a stop could not end
+// and no record names, so `rehearse end` cannot stop it.
+func (f rehearsalFakeaws) orphaned() string {
+	return fmt.Sprintf("fakeaws pid %d port %d is left running and no record names it: stop it by hand with kill -KILL -- -%d", f.PID, f.Port, f.PID)
 }
 
 // stop ends fakeaws's process group: SIGTERM, then SIGKILL if any process

@@ -61,7 +61,8 @@ func TestRehearsePrepareStandsTheWallsUp(t *testing.T) {
 	assert.Equal(t, []string{"providers schema -json", "resolver", "starter"}, events[len(events)-3:])
 	assert.Equal(t, "/flag/fakeaws", flagPath)
 	assert.NotNil(t, opts.started)
-	opts.started = nil
+	assert.NotNil(t, opts.stopped)
+	opts.started, opts.stopped = nil, nil
 	assert.Equal(t, rehearsalFakeawsOpts{bin: prepareStubBin, dir: filepath.Join(rehearsal, "fakeaws"), account: "123456789012", region: "eu-west-1"}, opts)
 
 	root := filepath.Join(rehearsal, "work", "envs", "prod")
@@ -193,6 +194,16 @@ func TestRehearsePrepareKeepsTheRehearsalWhenFakeawsWillNotStop(t *testing.T) {
 			require.NoError(t, os.Chmod(rehearsal, 0o700))
 			return rehearsalFakeaws{}, stopFailed
 		}, "stop failed: the stub's stop", false},
+		{"a start refused after its stopped try's record is cleared", func(t *testing.T, o rehearsalFakeawsOpts, rehearsal string, _ context.CancelFunc) (rehearsalFakeaws, error) {
+			require.NoError(t, o.started(rehearsalFakeaws{PID: 4141, Port: 4567, Token: "first-try"}))
+			require.NoError(t, o.stopped())
+			assert.NoFileExists(t, filepath.Join(rehearsal, rehearsalRecordFile), "the record still names a stopped try")
+			return rehearsalFakeaws{}, stopFailed
+		}, "stop failed: the stub's stop", false},
+		{"a start that never records", func(*testing.T, rehearsalFakeawsOpts, string, context.CancelFunc) (rehearsalFakeaws, error) {
+			return prepareStubFakeaws, nil
+		}, "fakeaws is refused: it started, but its record was never written; and fakeaws's stop failed: the stub's stop; " +
+			"fakeaws pid 4242 port 4566 is left running and no record names it: stop it by hand with kill -KILL -- -4242", false},
 		{"a retry's record write fails", func(t *testing.T, o rehearsalFakeawsOpts, rehearsal string, _ context.CancelFunc) (rehearsalFakeaws, error) {
 			require.NoError(t, o.started(rehearsalFakeaws{PID: 4141, Port: 4567, Token: "first-try"}))
 			require.NoError(t, os.Chmod(rehearsal, 0o500))
