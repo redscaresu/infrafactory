@@ -113,7 +113,9 @@ wait_bounded() {
   local pid="$1"
   for _ in $(seq 1 $((SWEEP_BOUND * 10))); do kill -0 "${pid}" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "${pid}" 2>/dev/null; then
-    kill -KILL -- "-${pid}" 2>/dev/null
+    # The group KILL misses a job that is not its own group leader, so the pid
+    # is KILLed too; the wait then returns instead of blocking on the child.
+    kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null
     wait "${pid}" 2>/dev/null
     WAITED_STATUS=still-running
     return
