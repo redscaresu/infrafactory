@@ -13,6 +13,9 @@
 #   $SWEEP_DIR/<scenario>.log  — full run stdout/stderr
 #   $SWEEP_DIR/<cloud>.pitfalls.diff
 #
+# SWEEP_RUN_TIMEOUT (seconds, default 1800) bounds each scenario's run. A run
+# that hits it is recorded as timed_out and the sweep moves on to the next.
+#
 # Discards pitfalls/<cloud>.yaml additions per
 # `feedback_sweep_protocol.md` — they're sweep noise that re-emerges
 # naturally on the next run.
@@ -23,9 +26,20 @@ set -u
 
 ROOT="${ROOT:-$(git rev-parse --show-toplevel)}"
 SWEEP_DIR="${SWEEP_DIR:-/tmp/sweep-39}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SWEEP_RUN_TIMEOUT="${SWEEP_RUN_TIMEOUT:-1800}"
+SWEEP_KILL_GRACE=30
+DEADLINE="$SCRIPT_DIR/scenario_gate_deadline.py"
 mkdir -p "$SWEEP_DIR"
 cd "$ROOT" || exit 1
 unset CLAUDECODE
+
+# Without python3 the deadline script cannot start, and each run would fail
+# before it began while the summary kept an older run's result.
+if ! command -v python3 >/dev/null; then
+  echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT" >&2
+  exit 1
+fi
 
 if [ ! -x ./bin/infrafactory ]; then
   echo "==> bin/infrafactory not found; running make build"
@@ -95,14 +109,25 @@ run_scenario() {
   ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
   local start
   start=$(date +%s)
-  ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1
+  "$DEADLINE" "$SWEEP_RUN_TIMEOUT" "$SWEEP_KILL_GRACE" \
+    ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1
   RUN_EC=$?
   RUN_DUR=$(( $(date +%s) - start ))
+  # grep -c already prints 0 on no match; `|| echo 0` would add a second 0.
+  RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null)
+  RUN_ITERS=${RUN_ITERS:-0}
+  # The deadline script exits 124 when the deadline passed. A run cut short
+  # has no trustworthy run.json; reading the newest one could report an
+  # earlier run's result.
+  if [ "$RUN_EC" -eq 124 ]; then
+    RUN_TERMINAL=timed_out
+    RUN_STATUS=timed_out
+    return
+  fi
   local rj
   rj=$(ls -td .infrafactory/runs/$name/*/ 2>/dev/null | head -1)run.json
   RUN_TERMINAL=$(grep -oE '"terminal_reason":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
   RUN_STATUS=$(grep -oE '"status":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
-  RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null || echo 0)
 }
 
 while IFS= read -r sc; do
