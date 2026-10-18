@@ -144,6 +144,14 @@ if [[ "$(uname)" == Linux ]]; then
   check "nothing of the run is left after the cancel" ok "$(wait_for none_left "${STUB}")"
 fi
 
+# A stopped scenario holds a TERM pending; only the KILL after the grace ends it.
+printf '#!/bin/bash\nkill -STOP $$\nsleep 60\n' > "${WORK}/stopped"
+chmod +x "${WORK}/stopped"
+gate_start stopped "${WORK}/stopped" 1
+gate_status
+check "a stopped scenario fails the gate" 1 "${GATE_RC}"
+check "a stopped scenario's row reads timeout" "timeout/timeout_1s" "$(row stopped)"
+
 printf '#!/bin/bash\necho "Status: success"\necho "- run/terminal_reason: pass (target_reached)"\n' > "${WORK}/ok"
 chmod +x "${WORK}/ok"
 gate_start ok "${WORK}/ok" 60
