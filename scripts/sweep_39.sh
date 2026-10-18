@@ -14,7 +14,10 @@
 #   $SWEEP_DIR/<cloud>.pitfalls.diff
 #
 # SWEEP_RUN_TIMEOUT (seconds, default 1800) bounds each scenario's run. A run
-# that hits it is recorded as timed_out and the sweep moves on to the next.
+# that hits it is recorded as timed_out and the sweep moves on to the next. A run
+# that writes no run.json of its own is recorded as no_result. SWEEP_KILL_GRACE
+# (seconds, default 30) is the wait between TERM and KILL. MOCK_LOG_ROOT
+# (default /private/tmp) is where the panic gate looks for mock logs.
 #
 # Discards pitfalls/<cloud>.yaml additions per
 # `feedback_sweep_protocol.md` — they're sweep noise that re-emerges
@@ -28,14 +31,28 @@ ROOT="${ROOT:-$(git rev-parse --show-toplevel)}"
 SWEEP_DIR="${SWEEP_DIR:-/tmp/sweep-39}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SWEEP_RUN_TIMEOUT="${SWEEP_RUN_TIMEOUT:-1800}"
-SWEEP_KILL_GRACE=30
+# The grace must exceed infrafactory's cancelKillFallback (internal/cli/exec_runner.go).
+# sweep_39_test.sh checks this default against that value.
+SWEEP_KILL_GRACE="${SWEEP_KILL_GRACE:-30}"
 DEADLINE="$SCRIPT_DIR/scenario_gate_deadline.py"
+MOCK_LOG_ROOT="${MOCK_LOG_ROOT:-/private/tmp}"
+RUN_MARKER="$SWEEP_DIR/.run-started"
+
+# The deadline script takes whole seconds; anything else would fail every run
+# before it started.
+for v in SWEEP_RUN_TIMEOUT SWEEP_KILL_GRACE; do
+  if ! [[ "${!v}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "sweep: $v must be a positive whole number of seconds, got '${!v}'" >&2
+    exit 1
+  fi
+done
+
 mkdir -p "$SWEEP_DIR"
 cd "$ROOT" || exit 1
 unset CLAUDECODE
 
-# Without python3 the deadline script cannot start, and each run would fail
-# before it began while the summary kept an older run's result.
+# python3 runs the deadline script. Without it no run starts, and the rows
+# would have nothing to report.
 if ! command -v python3 >/dev/null; then
   echo "sweep: python3 is needed to run each scenario under SWEEP_RUN_TIMEOUT" >&2
   exit 1
@@ -104,28 +121,54 @@ is_transport_failed_shape() {
   return 0
 }
 
+# Ctrl-C or TERM stops the sweep. The deadline script runs in the background,
+# so the trap fires at once: it TERMs the run (the deadline script KILLs its
+# group after the grace) and the sweep exits by the same signal. Otherwise
+# each Ctrl-C would only end the scenario in progress.
+watchdog=
+stop_sweep() {
+  trap - INT TERM
+  if [ -n "$watchdog" ]; then
+    kill -TERM "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+  fi
+  kill -"$1" $$
+}
+trap 'stop_sweep INT' INT
+trap 'stop_sweep TERM' TERM
+
 run_scenario() {
   local sc="$1" name="$2" log="$3"
   ./bin/infrafactory mock reset --config infrafactory.yaml >/dev/null 2>&1 || true
   local start
   start=$(date +%s)
-  "$DEADLINE" "$SWEEP_RUN_TIMEOUT" "$SWEEP_KILL_GRACE" \
-    ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1
+  touch "$RUN_MARKER"
+  python3 "$DEADLINE" "$SWEEP_RUN_TIMEOUT" "$SWEEP_KILL_GRACE" \
+    ./bin/infrafactory run "scenarios/training/$sc" --config infrafactory.yaml > "$log" 2>&1 &
+  watchdog=$!
+  wait "$watchdog"
   RUN_EC=$?
+  watchdog=
   RUN_DUR=$(( $(date +%s) - start ))
   # grep -c already prints 0 on no match; `|| echo 0` would add a second 0.
   RUN_ITERS=$(grep -c '"event":"iteration_start"' "$log" 2>/dev/null)
   RUN_ITERS=${RUN_ITERS:-0}
-  # The deadline script exits 124 when the deadline passed. A run cut short
-  # has no trustworthy run.json; reading the newest one could report an
-  # earlier run's result.
+  # The deadline script exits 124 when the deadline passed.
   if [ "$RUN_EC" -eq 124 ]; then
     RUN_TERMINAL=timed_out
     RUN_STATUS=timed_out
     return
   fi
+  # Only a run.json written after RUN_MARKER came from this run. Anything else
+  # (a run that never started, or one that died before writing) is no_result;
+  # an older run.json would report a run that is not this one.
   local rj
-  rj=$(ls -td .infrafactory/runs/$name/*/ 2>/dev/null | head -1)run.json
+  rj=$(find ".infrafactory/runs/$name" -name run.json -newer "$RUN_MARKER" 2>/dev/null | sort | tail -1)
+  if [ -z "$rj" ]; then
+    RUN_TERMINAL=no_result
+    RUN_STATUS=no_result
+    return
+  fi
   RUN_TERMINAL=$(grep -oE '"terminal_reason":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
   RUN_STATUS=$(grep -oE '"status":[ ]*"[a-z_]+"' "$rj" 2>/dev/null | head -1 | sed 's/.*"\([a-z_]*\)"/\1/')
 }
@@ -230,11 +273,8 @@ echo
 echo "=== panic gate ==="
 PANIC_LOG="$SWEEP_DIR/panics.log"
 : > "$PANIC_LOG"
-for log in /private/tmp/infrafactory-mocks/fakegcp.log \
-           /private/tmp/infrafactory-mocks/fakeaws.log \
-           /private/tmp/infrafactory-mocks/mockway.log \
-           /private/tmp/infrafactory-mocks/s3router.log \
-           /private/tmp/fakegcp.log /private/tmp/fakeaws.log /private/tmp/mockway.log; do
+for log in "$MOCK_LOG_ROOT"/infrafactory-mocks/{fakegcp,fakeaws,mockway,s3router}.log \
+           "$MOCK_LOG_ROOT"/{fakegcp,fakeaws,mockway}.log; do
   [ -f "$log" ] || continue
   if grep -iE 'panic:|runtime error:|recovered from panic|nil pointer dereference' "$log" >> "$PANIC_LOG" 2>/dev/null; then
     echo "PANIC in $log:"
