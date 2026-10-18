@@ -35,7 +35,8 @@ LOG_DIR="${LOG_DIR:-/tmp/scenario_gate_logs}"
 DEADLINE="$(dirname "$0")/scenario_gate_deadline.py"
 # KILL_AFTER outlasts infrafactory's own cancel-kill fallback for tofu
 # (cancelKillFallback in internal/cli/exec_runner.go), so a run kills its
-# tofu before it is killed itself.
+# tofu before it is killed itself; scenario_change_gate_test.sh checks the
+# default against that Go value.
 KILL_AFTER="${KILL_AFTER:-30}"
 mkdir -p "$LOG_DIR"
 

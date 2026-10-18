@@ -11,6 +11,7 @@ GATE="${REPO_ROOT}/scripts/scenario_change_gate.sh"
 DEADLINE="${REPO_ROOT}/scripts/scenario_gate_deadline.py"
 LOGS="${REPO_ROOT}/scripts/scenario_gate_logs.sh"
 WORKFLOW="${REPO_ROOT}/.github/workflows/scenario-gate.yml"
+EXEC_RUNNER="${REPO_ROOT}/internal/cli/exec_runner.go"
 FAILURES=0
 WORK="$(mktemp -d)"
 # Nothing of ours outlives the test, whatever it finds.
@@ -191,18 +192,23 @@ echo "scenario-gate.yml:"
 
 # A scenario's worst case is the deadline, the grace before the KILL and two
 # sweep commands; the gate's and the deadline script's values are read, not
-# restated. A value the regexes cannot find leaves got empty, which fails.
-got="$(python3 - "${WORKFLOW}" "${GATE}" "${DEADLINE}" <<'PY'
+# restated. The grace must also outlast infrafactory's own tofu kill fallback,
+# read from the Go source, or the sweep KILLs tofu mid-cancel. A value the
+# regexes cannot find leaves a line empty, which fails.
+got="$(python3 - "${WORKFLOW}" "${GATE}" "${DEADLINE}" "${EXEC_RUNNER}" <<'PY'
 import re, sys, yaml
-workflow, gate, deadline = (open(p).read() for p in sys.argv[1:4])
+workflow, gate, deadline, exec_runner = (open(p).read() for p in sys.argv[1:5])
 job = yaml.safe_load(workflow)["jobs"]["scenario-gate"]
 kill_after = int(re.search(r'^KILL_AFTER="\$\{KILL_AFTER:-(\d+)\}"$', gate, re.M).group(1))
 sweep = int(re.search(r"^SWEEP_SECONDS = (\d+)$", deadline, re.M).group(1))
+fallback = int(re.search(r"^var cancelKillFallback = (\d+) \* time\.Second$", exec_runner, re.M).group(1))
 worst = int(job["env"]["MAX_SCENARIOS"]) * (int(job["env"]["PER_SCENARIO_TIMEOUT"]) + kill_after + 2 * sweep) / 60
 print("ok" if job["timeout-minutes"] > worst else f"timeout-minutes {job['timeout-minutes']} <= {worst:g}")
+print("ok" if kill_after > fallback else f"KILL_AFTER {kill_after} <= cancelKillFallback {fallback}")
 PY
 )"
-check "the job timeout exceeds MAX_SCENARIOS x (PER_SCENARIO_TIMEOUT + KILL_AFTER + 2 x SWEEP_SECONDS) / 60" ok "${got}"
+check "the job timeout exceeds MAX_SCENARIOS x (PER_SCENARIO_TIMEOUT + KILL_AFTER + 2 x SWEEP_SECONDS) / 60" ok "$(sed -n 1p <<< "${got}")"
+check "the gate's default KILL_AFTER exceeds infrafactory's cancelKillFallback" ok "$(sed -n 2p <<< "${got}")"
 
 if (( FAILURES > 0 )); then
   echo "${FAILURES} case(s) failed"
