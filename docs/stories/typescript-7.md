@@ -1,6 +1,6 @@
 ---
 kind: chore
-status: later
+status: ready
 touches: [ui/package.json, ui/package-lock.json]
 ---
 
