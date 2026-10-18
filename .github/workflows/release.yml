@@ -11,10 +11,9 @@ name: Release
 #
 # The matrix only builds and uploads artifacts. The release job runs only
 # after every leg succeeds. It refuses a tag that already has a published
-# release, deletes that tag's drafts (never published, so nothing public
-# changes), creates a fresh draft, uploads the binaries to it, and publishes
-# it last. A failed run leaves at most a draft. The next run for the same tag
-# deletes it; a draft for a dry-run tag or a tag never retried stays.
+# release, creates the release as a draft with the binaries attached, and
+# publishes it last on a tag push. A draft for the tag that a failed run left
+# behind is not deleted; delete it by hand.
 #
 # A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
 # accepts only that form. So the dry run cannot replace a real release, and
@@ -147,59 +146,34 @@ jobs:
           expected=$(jq -r '.[] | "infrafactory-\(.goos)-\(.goarch)" as $b | $b, "\($b).sha256"' <<< "${TARGETS}" | sort)
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
-      # Refuses a published release for the tag, and changes nothing then. Any
-      # other release for the tag is a draft, and every such draft is deleted,
-      # including one a person made by hand. Nothing public changes. Each gh
-      # and jq call fails the job on error.
-      - name: Refuse a published release, then delete the tag's drafts
+      # Refuses if any release for the tag is not a draft. A draft is left alone,
+      # so a stale one for the tag stays until someone deletes it by hand. A
+      # release with no draft field counts as published, so the step fails
+      # closed. Each gh and jq call fails the job on error.
+      - name: Refuse a published release
         run: |
           set -eo pipefail
           releases=$(gh api --paginate "repos/${GH_REPO}/releases") \
             || { echo "could not list the releases for ${VERSION}; nothing was changed" >&2; exit 1; }
-          matches=$(jq -s -c --arg tag "${VERSION}" 'add // [] | map(select(.tag_name == $tag))' <<< "${releases}")
-          published=$(jq '[.[] | select(.draft == false)] | length' <<< "${matches}")
-          if [[ "${published}" != "0" ]]; then
+          not_draft=$(jq -s --arg tag "${VERSION}" 'add // [] | map(select(.tag_name == $tag and .draft != true)) | length' <<< "${releases}")
+          if [[ "${not_draft}" != "0" ]]; then
             echo "release ${VERSION} is already published; nothing was changed." >&2
             exit 1
           fi
-          ids=$(jq -r '.[].id' <<< "${matches}")
-          for id in ${ids}; do
-            gh api -X DELETE "repos/${GH_REPO}/releases/${id}"
-          done
 
-      # Created here, not by an action, so the release id is known.
-      - name: Create the draft release
-        id: create
+      # gh creates the release as a draft and attaches the binaries before it
+      # is published. A dry run has no tag yet, so only a tag push verifies one.
+      - name: Create the draft release with every file
         run: |
           set -eo pipefail
-          case "${VERSION}" in
-            *-*) prerelease=true ;;
-            *) prerelease=false ;;
-          esac
-          id=$(gh api -X POST "repos/${GH_REPO}/releases" \
-            -f tag_name="${VERSION}" -f target_commitish="${GITHUB_SHA}" \
-            -F draft=true -F prerelease="${prerelease}" -F generate_release_notes=true \
-            --jq .id)
-          [[ "${id}" =~ ^[0-9]+$ ]] || { echo "GitHub returned no release id for ${VERSION}" >&2; exit 1; }
-          echo "id=${id}" >> "${GITHUB_OUTPUT}"
+          flags=(--draft --generate-notes)
+          if [[ "${GITHUB_EVENT_NAME}" == push ]]; then flags+=(--verify-tag); fi
+          if [[ "${VERSION}" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "${VERSION}" dist/* "${flags[@]}"
 
-      # Every file is attached to the draft by id, while it is still a draft.
-      - name: Upload the binaries to the draft
-        env:
-          RELEASE_ID: ${{ steps.create.outputs.id }}
-        run: |
-          set -eo pipefail
-          for file in dist/*; do
-            gh api -X POST "https://uploads.github.com/repos/${GH_REPO}/releases/${RELEASE_ID}/assets?name=$(basename "${file}")" \
-              -H "Content-Type: application/octet-stream" --input "${file}" > /dev/null
-          done
-
-      # Publishes by the id the create step returned, so it cannot publish a
-      # different release with the same tag.
+      # Publishes last, on a tag push only. A dry run stays a draft.
       - name: Publish the release
         if: ${{ github.event_name == 'push' }}
-        env:
-          RELEASE_ID: ${{ steps.create.outputs.id }}
         run: |
           set -eo pipefail
-          gh api -X PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" -F draft=false
+          gh release edit "${VERSION}" --draft=false
