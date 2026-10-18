@@ -13,7 +13,8 @@ name: Release
 # after every leg succeeds. It refuses a tag that already has a published
 # release, deletes that tag's drafts (never published, so nothing public
 # changes), creates a fresh draft, uploads the binaries to it, and publishes
-# it last. A failed run leaves at most a draft, which the next run deletes.
+# it last. A failed run leaves at most a draft. The next run for the same tag
+# deletes it; a draft for a dry-run tag or a tag never retried stays.
 #
 # A v0.0.0-dryrun-* tag is accepted only by workflow_dispatch, and dispatch
 # accepts only that form. So the dry run cannot replace a real release, and
@@ -147,8 +148,9 @@ jobs:
           diff <(printf '%s\n' "${expected}") <(find dist -maxdepth 1 -type f -exec basename {} \; | sort)
 
       # Refuses a published release for the tag, and changes nothing then. Any
-      # other release for the tag is a draft, so the tag's drafts are deleted:
-      # nothing public changes. Each gh and jq call fails the job on error.
+      # other release for the tag is a draft, and every such draft is deleted,
+      # including one a person made by hand. Nothing public changes. Each gh
+      # and jq call fails the job on error.
       - name: Refuse a published release, then delete the tag's drafts
         run: |
           set -eo pipefail
@@ -181,11 +183,16 @@ jobs:
           [[ "${id}" =~ ^[0-9]+$ ]] || { echo "GitHub returned no release id for ${VERSION}" >&2; exit 1; }
           echo "id=${id}" >> "${GITHUB_OUTPUT}"
 
-      # Every file is attached while the release is still a draft.
+      # Every file is attached to the draft by id, while it is still a draft.
       - name: Upload the binaries to the draft
+        env:
+          RELEASE_ID: ${{ steps.create.outputs.id }}
         run: |
           set -eo pipefail
-          gh release upload "${VERSION}" dist/*
+          for file in dist/*; do
+            gh api -X POST "https://uploads.github.com/repos/${GH_REPO}/releases/${RELEASE_ID}/assets?name=$(basename "${file}")" \
+              -H "Content-Type: application/octet-stream" --input "${file}" > /dev/null
+          done
 
       # Publishes by the id the create step returned, so it cannot publish a
       # different release with the same tag.
@@ -195,5 +202,4 @@ jobs:
           RELEASE_ID: ${{ steps.create.outputs.id }}
         run: |
           set -eo pipefail
-          : "${RELEASE_ID:?the create step returned no release id}"
           gh api -X PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" -F draft=false
