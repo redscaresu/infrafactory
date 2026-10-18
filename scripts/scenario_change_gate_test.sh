@@ -17,6 +17,9 @@ WORK="$(mktemp -d)"
 # Nothing of ours outlives the test, whatever it finds.
 trap 'pkill -KILL -f "${WORK}" 2> /dev/null; rm -rf "${WORK}"' EXIT
 TRIES=50 # polls of 0.1 s: every wait below has this deadline
+# A whole gate run gets a longer one: a lost TERM costs the deadline plus the
+# grace before its row is written, and a loaded runner stretches that.
+GATE_TRIES=300
 
 # check <name> <want> <got>
 check() {
@@ -28,10 +31,11 @@ check() {
   fi
 }
 
-# wait_for <command...>: polls until the command succeeds; prints ok or timeout.
+# wait_for <command...>: polls until the command succeeds; prints ok or
+# timeout. The deadline is TRIES polls, or WAIT_TRIES when the caller sets it.
 wait_for() {
   local i
-  for ((i = 0; i < TRIES; i++)); do
+  for ((i = 0; i < ${WAIT_TRIES:-${TRIES}}; i++)); do
     "$@" > /dev/null 2>&1 && { echo ok; return; }
     sleep 0.1
   done
@@ -72,7 +76,7 @@ gate_start() {
 # gate_status: sets GATE_RC to the started gate's exit code once it is gone,
 # or kills it and sets hung. Not a subshell: only this shell can wait for it.
 gate_status() {
-  if [[ "$(wait_for gone "${GATE_PID}")" != ok ]]; then
+  if [[ "$(WAIT_TRIES="${GATE_TRIES}" wait_for gone "${GATE_PID}")" != ok ]]; then
     kill -KILL "${GATE_PID}" 2> /dev/null
     GATE_RC=hung
     return
