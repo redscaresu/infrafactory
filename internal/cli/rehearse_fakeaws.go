@@ -122,10 +122,10 @@ func startRehearsalFakeawsOnce(ctx context.Context, opts rehearsalFakeawsOpts, t
 	// the passthroughs and `rehearse end` (ADR-0042 § Start).
 	//
 	// ponytail: a prepare SIGKILLed after Start but before rehearsal.json
-	// is written leaves fakeaws running, recorded nowhere. A parent cannot
-	// drop a death signal once the child runs, so the fix is in fakeaws: a
-	// lease it exits on unless prepare releases it after the write. Add it
-	// if a killed prepare ever leaves one behind.
+	// is written leaves fakeaws running on the rehearsal's db, and `rehearse
+	// end` on that rehearsal finds no record, signals nothing and removes
+	// the dir. The token is known before Start, so the fix is to record
+	// pid, port and token right after it: story fakeaws-record-at-start.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A nil Stdin is /dev/null.
 	cmd.Stdout, cmd.Stderr = logFile, logFile

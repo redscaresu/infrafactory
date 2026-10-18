@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -46,11 +47,28 @@ var fakeawsShellEnv = []string{"PWD", "SHLVL", "_"}
 // "bind-fail" fail to bind on their first or on every try; "ignore-term"
 // ignores SIGTERM; "prints-token" logs its token and exits 1;
 // "exits-after-checks" exits 3 once start's last request is answered; "zero-stop"
-// only stops a zero rehearsalFakeaws.
+// only stops a zero rehearsalFakeaws; "starter" is prepare, not fakeaws:
+// it starts the stub at the first arg after "--" and writes its pid, port
+// and token to the second, then exits 0.
 func TestRehearsalFakeawsStub(t *testing.T) {
 	role := os.Getenv(fakeawsStubEnv)
 	if role == "" {
 		return
+	}
+	if role == "starter" {
+		bin, ready := flag.Arg(0), flag.Arg(1)
+		f, err := rehearsalStartFakeaws(context.Background(), rehearsalFakeawsOpts{
+			bin: bin, dir: filepath.Join(filepath.Dir(ready), "fakeaws"), account: "123456789012", region: "eu-west-1",
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if os.WriteFile(ready+".tmp", fmt.Appendf(nil, "%d %d %s", f.PID, f.Port, f.Token), 0o600) != nil ||
+			os.Rename(ready+".tmp", ready) != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	if role == "zero-stop" {
 		if (rehearsalFakeaws{}).stop() != nil {
@@ -269,6 +287,51 @@ func TestRehearsalStartFakeawsOutlivesCtx(t *testing.T) {
 		"fakeaws died with the ctx that started it")
 	require.NoError(t, f.stop())
 	assert.False(t, groupAlive(f.PID), "fakeaws outlived stop")
+}
+
+// fakeaws must outlive the prepare that started it, for the passthroughs
+// and `rehearse end` (ADR-0042 § Start): a death signal, such as
+// childSysProcAttr's on Linux, would kill it as prepare exits.
+func TestRehearsalStartFakeawsOutlivesItsStarter(t *testing.T) {
+	bin, stubDir := fakeawsStub(t, "fakeaws")
+	ready := filepath.Join(t.TempDir(), "ready")
+	// Past the starter's own ready wait, so a stall is the starter's, not fakeaws's.
+	ctx, cancel := context.WithTimeout(context.Background(), rehearsalFakeawsReady+15*time.Second)
+	defer cancel()
+	starter := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRehearsalFakeawsStub$", "--", bin, ready)
+	starter.Env = append(os.Environ(), fakeawsStubEnv+"=starter")
+	starter.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	starter.Cancel = func() error { return syscall.Kill(-starter.Process.Pid, syscall.SIGKILL) }
+	starter.WaitDelay = 5 * time.Second
+	// fakeaws leads a group of its own, so a starter that never reported
+	// it leaves each group the stub recorded to be killed here.
+	recorded := false
+	t.Cleanup(func() {
+		for _, pid := range fakeawsStubPIDs(stubDir) {
+			if !recorded && groupAlive(pid) {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+		}
+	})
+	out, err := starter.CombinedOutput()
+	require.NoError(t, err, "the starter failed: %s", out)
+	raw, err := os.ReadFile(ready)
+	require.NoError(t, err)
+	var f rehearsalFakeaws
+	_, err = fmt.Sscanf(string(raw), "%d %d %s", &f.PID, &f.Port, &f.Token)
+	require.NoError(t, err)
+	f.gone = new(atomic.Bool)
+	recorded = true
+	stopOnCleanup(t, f)
+
+	client := rehearsalFakeawsClient()
+	url := fmt.Sprintf("http://127.0.0.1:%d/mock/requests", f.Port)
+	assert.Never(t, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		code, err := rehearsalFakeawsStatus(ctx, client, url, f.Token)
+		return err != nil || code != http.StatusOK
+	}, 2*time.Second, 50*time.Millisecond, "fakeaws died with the process that started it")
 }
 
 func TestRehearsalFakeawsStopKillsAGroupIgnoringSIGTERM(t *testing.T) {
