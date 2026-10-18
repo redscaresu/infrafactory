@@ -178,6 +178,8 @@ expect "a finished sweep leaves the fix line out of pitfalls" yes "$([ ! -s "${r
 # scenario has appended its fix line, so the stop must restore the pitfalls.
 reset_root="$(make_root)"
 echo 3 > "${reset_root}/reset-hang-at"
+mkdir -p "${reset_root}/sweep"
+echo "stale log from an earlier sweep" > "${reset_root}/sweep/quick-scenario.log"
 set -m
 start=$SECONDS
 start_sweep "${reset_root}" SWEEP_RESET_TIMEOUT=3
@@ -190,6 +192,7 @@ expect "a mock reset past its deadline stops the sweep with exit 3" 3 "${reset_s
 expect "the sweep does not wait for a hung mock reset" yes "$([ "${reset_elapsed}" -lt "${SWEEP_BOUND}" ] && echo yes || echo no)"
 expect "the stop names the mock reset" yes "$(grep -q 'mock reset did not return' "${reset_root}/out.txt" && echo yes || echo no)"
 expect "the blocked scenario is recorded as reset_timed_out" reset_timed_out "$(awk -F'\t' -v n=quick-scenario '$1 == n {print $2}' "${reset_root}/sweep/summary.tsv")"
+expect "the blocked scenario's row has no log from an earlier sweep" no "$([ -e "${reset_root}/sweep/quick-scenario.log" ] && echo yes || echo no)"
 expect "the stop restores the pitfalls the earlier scenario added" yes "$([ ! -s "${reset_root}/pitfalls/aws.yaml" ] && echo yes || echo no)"
 expect "the summary and panic gate still run after a timed-out reset" yes "$(grep -q '=== panic gate ===' "${reset_root}/out.txt" && grep -q '=== summary ===' "${reset_root}/out.txt" && echo yes || echo no)"
 rm -rf "${reset_root}"
@@ -208,6 +211,21 @@ set +m
 expect "a sweep still running past the bound is KILLed" still-running "${stuck_status}"
 expect "the hung fake reset is not left sleeping" no "$(kill -0 "$(cat "${stuck_root}/reset-hung")" 2>/dev/null && echo yes || echo no)"
 rm -rf "${stuck_root}"
+
+# A panic in a mock log and a hung reset in one sweep: the panic wins (exit 2),
+# and the reset stop is still named on stderr.
+panic_root="$(make_root)"
+echo 3 > "${panic_root}/reset-hang-at"
+echo "panic: boom" > "${panic_root}/mocklogs/fakegcp.log"
+set -m
+start_sweep "${panic_root}" SWEEP_RESET_TIMEOUT=3
+panic_pid=$!
+wait_bounded "${panic_pid}" "${panic_root}"
+panic_status=${WAITED_STATUS}
+set +m
+expect "a panic and a hung reset in one sweep exit 2" 2 "${panic_status}"
+expect "the reset stop is still named when a panic also surfaces" yes "$(grep -q 'mock reset did not return' "${panic_root}/out.txt" && echo yes || echo no)"
+rm -rf "${panic_root}"
 
 # TERM to the sweep during a hung reset ends it at once, through the stop trap,
 # instead of after the reset's deadline.

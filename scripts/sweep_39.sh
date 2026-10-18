@@ -20,7 +20,9 @@
 # (seconds, default 300) bounds each `mock reset`. A reset that hits it stops the
 # loop: the blocked scenario's row is recorded as reset_timed_out, or, on the S101
 # retry, the first attempt's row is kept. The tail then runs as usual, and the
-# sweep exits 3 at its end. SWEEP_KILL_GRACE (seconds, default 30) is the wait
+# sweep exits 3 at its end. If the panic gate also finds a panic, the sweep
+# exits 2 instead, since a panic is a real regression; the reset error is
+# printed either way. SWEEP_KILL_GRACE (seconds, default 30) is the wait
 # between TERM and KILL for both. MOCK_LOG_ROOT
 # (default /private/tmp) is where the panic gate looks for mock logs.
 #
@@ -168,9 +170,9 @@ restore_pitfalls() {
 }
 
 # Ctrl-C or TERM stops the sweep. The deadline script runs in the background,
-# so the trap fires at once: it TERMs the run (the deadline script KILLs its
-# group after the grace), the pitfalls are restored, and the sweep exits by
-# the same signal. Otherwise each Ctrl-C would only end the scenario in
+# so the trap fires at once: it TERMs the scenario run or the mock reset in
+# progress (the deadline script KILLs its group after the grace), the pitfalls
+# are restored, and the sweep exits by the same signal. Otherwise each Ctrl-C would only end the scenario in
 # progress. Signals are ignored while restoring, so a second Ctrl-C cannot
 # skip the restore.
 watchdog=
@@ -214,6 +216,8 @@ run_scenario() {
   local sc="$1" name="$2" log="$3"
   reset_mocks
   if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+    # No run wrote this log, so any left under the name is an earlier sweep's.
+    rm -f "$log"
     RUN_TERMINAL=reset_timed_out
     RUN_STATUS=reset_timed_out
     RUN_ITERS=0
@@ -384,12 +388,15 @@ if [ "$avoid_total" = "0" ]; then
   echo "WARN: zero avoid-pitfall emissions this sweep. Could be (a) the LLM stopped making deletion-recoverable mistakes, or (b) the avoid extractor broke. Cross-reference next sweep before treating as a regression."
 fi
 
-# Exit non-zero if any panic surfaced — that's a real regression.
+if [ "$RESET_TIMED_OUT" -eq 1 ]; then
+  echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; the sweep stopped before the remaining scenarios" >&2
+fi
+# Exit non-zero if any panic surfaced — that's a real regression, so it wins
+# over a reset stop.
 if [ "$panic_lines" -gt 0 ]; then
   echo "FAIL: panic-gate detected $panic_lines line(s); see $PANIC_LOG"
   exit 2
 fi
 if [ "$RESET_TIMED_OUT" -eq 1 ]; then
-  echo "sweep: mock reset did not return within ${SWEEP_RESET_TIMEOUT}s; the sweep stopped before the remaining scenarios" >&2
   exit "$RESET_TIMED_OUT_EXIT"
 fi
