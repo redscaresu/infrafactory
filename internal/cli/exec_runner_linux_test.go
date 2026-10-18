@@ -28,13 +28,19 @@ func TestExecRunnerChildDiesWithInfrafactory(t *testing.T) {
 	require.NoError(t, err)
 	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	// Killed only if never seen gone: once it is, the pid may be another process's.
+	gone := false
+	t.Cleanup(func() {
+		if !gone {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
 	require.True(t, processAlive(pid), "the sleep never started")
 
 	require.NoError(t, helper.Process.Kill())
 	_ = helper.Wait()
 
-	assert.Eventually(t, func() bool { return !processAlive(pid) }, 2*time.Second, 10*time.Millisecond,
+	gone = assert.Eventually(t, func() bool { return !processAlive(pid) }, 2*time.Second, 10*time.Millisecond,
 		"the sleep outlived the process that started it")
 }
 

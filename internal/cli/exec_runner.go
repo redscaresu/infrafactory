@@ -157,8 +157,10 @@ const raiseWait = time.Second
 // does about signals. Where no guard holds the signal (live teardown,
 // Layer 2, the UI), release raises it again once tofu has stopped,
 // ending the process as it would have ended without this. Otherwise the
-// process would die at once and leave tofu running with no parent, to
-// die mid-destroy on its next write to a broken pipe. Where a guard
+// process would die at once, and tofu with it or after it: on Linux the
+// kernel SIGKILLs tofu (see childSysProcAttr), stopping it mid-apply
+// with its state unsaved; elsewhere tofu runs on with no parent, to die
+// mid-destroy on its next write to a broken pipe. Where a guard
 // holds it, raising it again would reach that guard as a second signal,
 // which abandons a teardown.
 func catchSignalsDuringRun(ctx context.Context) (context.Context, func()) {
