@@ -12,11 +12,11 @@
     "test:e2e": "npx playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
-    "@sveltejs/adapter-static": "^3.0.5",
+    "@playwright/test": "^1.65.0",
+    "@sveltejs/adapter-static": "^4.0.1",
     "@sveltejs/kit": "^2.70.3",
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@tailwindcss/vite": "^4.3.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tailwindcss/vite": "^4.3.4",
     "svelte": "^5.57.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^6.0.3",
